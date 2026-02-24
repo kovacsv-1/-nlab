@@ -8,7 +8,6 @@ public class MovingPlatform : MonoBehaviour
     private int currentFrame = 0;
     public bool started = true;
     public bool looping = true;
-    private bool wasWalking = false;
     private Vector3 startPos;
 
     void Awake() {

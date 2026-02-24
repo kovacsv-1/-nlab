@@ -1,4 +1,5 @@
 using UnityEngine;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -46,17 +47,23 @@ public class PlayerMovement : MonoBehaviour
     private Vector3 groundNormal = new Vector3(0f, 1f, 0f);
     private bool isCrouching = false;
     private bool jumping = false;
-    private Transform camera;
+    public bool hardSpeedCap = true;
+    private Transform cameraTf;
     public float groundAccel = 10f; //reach max speed in 0.1s
     public float airAccel = 10f;
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
 
+    List<Vector3> poss = new List<Vector3>();
+    List<Vector3> dirst = new List<Vector3>();
+
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
-        camera = GetComponentInChildren<Camera>().GetComponent<Transform>();
+        cameraTf = GetComponentInChildren<Camera>().GetComponent<Transform>();
         boundingBox = GetComponent<BoxCollider>();
+        //Physics.defaultContactOffset = 0;
+        // GroundCheck(this.gameObject.transform.position);
     }
 
     // FixedUpdate is called once per tick
@@ -65,7 +72,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 newPos = this.gameObject.transform.position;
 
         //  1. If stuck, attempt to find free space and skip to step 14,
-        if (!UnsweptTrace())
+        if (UnsweptTrace(newPos))
         {
             //TODO: attempt to find free space
         }
@@ -94,7 +101,7 @@ public class PlayerMovement : MonoBehaviour
             //  7. If on ground, zero out vertical velocity and apply friction,
             if (ground != null)
             {
-                velocity = new Vector3(velocity.x, 0, velocity.z); //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
+                velocity = velocity - Vector3.Dot(velocity, groundNormal) * groundNormal; //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
                 Friction();
             }
 
@@ -103,11 +110,11 @@ public class PlayerMovement : MonoBehaviour
 
             //  9. Movement and collisions,
             //TODO
-            newPos = this.gameObject.transform.position + velocity * Time.deltaTime;
+            newPos = Move(4, Time.fixedDeltaTime, newPos);
             //handle step up on collision, step down at the end of frame
 
             // 10. Check for ground to stand on,
-            GroundCheck();
+            newPos = GroundCheck(newPos);
 
             // 11. Apply other half of gravity,
             AddHalfGravity();
@@ -115,7 +122,7 @@ public class PlayerMovement : MonoBehaviour
             // 12. If on ground, zero out vertical velocity,
             if (ground != null)
             {
-                velocity = new Vector3(velocity.x, 0, velocity.z); //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
+                velocity = velocity - Vector3.Dot(velocity, groundNormal) * groundNormal; //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
             }
 
             // 13. Cap velocity,
@@ -124,6 +131,7 @@ public class PlayerMovement : MonoBehaviour
         } //if stuck in step 1., skip to step 14.
 
         // 14. Check for triggers to activate,
+        // CheckTriggers(newPos);
 
         // 15. Update bounding box,
         transform.position = newPos;
@@ -131,13 +139,15 @@ public class PlayerMovement : MonoBehaviour
 
         // 16. Shoot / detonate projectiles.
 
+
+
         jumping = false; //reset jump input, will be set to true again if the player presses the jump button before the next FixedUpdate
     }
 
     // Update is called once per frame
     void Update()
     {
-        if (Input.GetButtonDown("Jump")) // || autoBHop && Input.GetButton("Jump")
+        if (Input.GetButtonDown("Jump") || Input.GetButton("Jump")) // || autoBHop && Input.GetButton("Jump")
         {
             jumping = true;
         }
@@ -159,9 +169,9 @@ public class PlayerMovement : MonoBehaviour
 
         Vector3 relVelocity = velocity - groundVel;
 
-        Vector3 normal = groundNormal.sqrMagnitude > 0.001f ? groundNormal : Vector3.up;
+        //Vector3 normal = groundNormal.sqrMagnitude > 0.001f ? groundNormal : Vector3.up;
         
-        Vector3 lateralRelVelocity = relVelocity - Vector3.Dot(relVelocity, normal) * normal;
+        Vector3 lateralRelVelocity = relVelocity - Vector3.Dot(relVelocity, groundNormal) * groundNormal;
         float speed = lateralRelVelocity.magnitude;
         if (speed < 0.01f)
             return;
@@ -175,7 +185,7 @@ public class PlayerMovement : MonoBehaviour
             lateralRelVelocity *= newSpeed / speed;
         }
 
-        Vector3 normalComponent = Vector3.Dot(relVelocity, normal) * normal;
+        Vector3 normalComponent = Vector3.Dot(relVelocity, groundNormal) * groundNormal;
 
         velocity = lateralRelVelocity + normalComponent + groundVel;
     }
@@ -199,7 +209,7 @@ public class PlayerMovement : MonoBehaviour
 
     void AddHalfGravity()
     {
-        velocity = velocity - (gravity * 0.5f * Time.deltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
+        velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
     }
 
     void CapSpeed(float cap)
@@ -209,8 +219,8 @@ public class PlayerMovement : MonoBehaviour
 
     void Accelerate() 
     {
-        Vector3 forward = camera.forward;
-        Vector3 right = camera.right;
+        Vector3 forward = cameraTf.forward;
+        Vector3 right = cameraTf.right;
 
         //don't influence add_speed by making the normalized look down and let that component get lost later
         forward.y = 0f;
@@ -235,7 +245,7 @@ public class PlayerMovement : MonoBehaviour
         //this is weird, maybe like (as this option makes looking up and going forward + pressing jump move even more steeply up): (Input.GetAxisRaw("Horizontal") * right + Input.GetAxisRaw("Vertical") * forward + BoolToFloat(Input.GetButton("Jump")) * Vector3.up).normalized;
         //Vector3 waterWishdir = new Vector3(Input.GetAxisRaw("Horizontal") * right.x + Input.GetAxisRaw("Vertical") * forward.x , Mathf.Clamp(Input.GetAxisRaw("Horizontal") * right.y + Input.GetAxisRaw("Vertical") * forward.y + BoolToFloat(Input.GetButton("Jump")), -1f, 1f), Input.GetAxisRaw("Horizontal") * right.z + Input.GetAxisRaw("Vertical") * forward.z).normalized;
     
-        // WaterAccelerate(waterWoishdir);
+        // WaterAccelerate(waterWishdir);
     }
 
     void GroundAccelerate(Vector3 wishdir, Vector3 forward) 
@@ -252,17 +262,18 @@ public class PlayerMovement : MonoBehaviour
             }
         }
 
+        if (hardSpeedCap && (velocity - groundVel).magnitude > walkSpeed * classSpeedMod) velocity = (velocity - groundVel).normalized * walkSpeed * classSpeedMod + groundVel; //not capspeed because groundmovement isn't a flat increase
+
         //weird ass code in quake, makes zigzagging and wallstrafing (as well as airstrafing, but different) work
         float currentSpeed = Vector3.Dot(velocity - groundVel, Vector3.ProjectOnPlane(wishdir, groundNormal).normalized);
         bool movingBackward = Vector3.Dot(wishdir, forward) < -0.5f;
         float wishSpeed = walkSpeed * classSpeedMod * (isCrouching ? duckSpeedMod : 1) * (movingBackward && !isCrouching ? backSpeedMod : 1);
 
         //this does way too much, but this is what clamp is for (the crouching and backwards check was added after this comment was already written, but it didn't stop me)
-        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0, groundAccel * wishSpeed * Time.deltaTime);
+        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0, groundAccel * wishSpeed * Time.fixedDeltaTime);
 
         //return new velocity
         velocity = velocity + addSpeed * Vector3.ProjectOnPlane(wishdir, groundNormal).normalized;
-
     }
 
     void AirAccelerate(Vector3 wishdir) 
@@ -271,7 +282,7 @@ public class PlayerMovement : MonoBehaviour
         float currentSpeed = Vector3.Dot(velocity, wishdir);
 
         //this does way too much, but this is what clamp is for
-        float addSpeed = Mathf.Clamp(airSpeed - currentSpeed, 0, airAccel * airSpeed * Time.deltaTime);
+        float addSpeed = Mathf.Clamp(airSpeed - currentSpeed, 0, airAccel * airSpeed * Time.fixedDeltaTime);
 
         //return new velocity
         velocity = velocity + addSpeed * wishdir;
@@ -283,8 +294,9 @@ public class PlayerMovement : MonoBehaviour
         
     }
 
-    void GroundCheck()
+    Vector3 GroundCheck(Vector3 pos)
     {
+        Vector3 ret = pos;
         float groundYVel = 0f;
         if (ground != null) {
             MovingPlatform platform = ground.GetComponent<MovingPlatform>();
@@ -296,13 +308,12 @@ public class PlayerMovement : MonoBehaviour
         if (velocity.y > leaveVelocity + groundYVel)
         {
             ground = null;
-            return;
+            return ret;
         }
 
-        Vector3 prevNormal = groundNormal;
         groundNormal = Vector3.up;
         
-        Vector3 origin = transform.position + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
+        Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
         Vector3.up / 2; // for the unity docs thing, so we cast from far enough up to have no overlap
         //"For colliders that overlap the sphere at the start of the sweep,
         //RaycastHit.normal is set opposite to the direction of the sweep,
@@ -314,7 +325,7 @@ public class PlayerMovement : MonoBehaviour
         
         RaycastHit[] hits = Physics.BoxCastAll(
             origin,
-            new Vector3(boundingBoxWidth, 1f, boundingBoxWidth),
+            new Vector3(boundingBoxWidth, 1f, boundingBoxWidth) * 0.5f,
             Vector3.down,
             Quaternion.identity,
             groundingHeight,
@@ -322,39 +333,38 @@ public class PlayerMovement : MonoBehaviour
             QueryTriggerInteraction.Ignore
         );
 
-        float bestDot = cosMaxWalkableAngle;
         GameObject found = null;
         float distance = 0f;
+        float minDistance = 2f;
 
         foreach (RaycastHit hit in hits) {
-            //if (/*hit.collider != boundingBox //masked out anyway */ /*&& ground == hit.collider.gameObject*/) {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
-            if (dot >= bestDot) {
-                bestDot = dot;
+            if (dot >= cosMaxWalkableAngle && hit.distance <= minDistance) {
+                //bestDot = dot; //if looking for flattest instead of highest
                 groundNormal = hit.normal;
                 found = hit.collider.gameObject;
                 distance = hit.distance;
-                break; //this isn't needed if the if is better, currently finding highest walkable ground, so no clipping occurs, without the break finding flattest ground of all available
+                minDistance = hit.distance;
             }
-            //}
         }
         
-        if (ground != null)
+        if (ground != null && found != null)
         {
-            transform.position = transform.position - Vector3.up * distance;
+            ret = pos - Vector3.up * distance + Vector3.up * surfaceExtention;
         }
 
         ground = found;
+        return ret;
     }
 
     //collision is weird in source games, code to mimic traces as described in the collision section of "Review.pdf"
     //these are weird, so wallbugs (along other things) behave similiarly to the source/quake engine's bsp collision (TODO: actually copy it in more detail)
-    bool UnsweptTrace()
+    bool UnsweptTrace(Vector3 pos)
     {
         Collider[] colliders = Physics.OverlapBox(
-            transform.position,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f,
-            transform.rotation, //I mean, this is axis aligned, and unnecessary, but sure
+            pos,
+            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //surfaceextention?, crouch?
+            Quaternion.identity,
             colliderMask
         );
         if (colliders.Length > 0)
@@ -365,17 +375,18 @@ public class PlayerMovement : MonoBehaviour
     }
 
     //this is weird, has 2 version for leaves and brushes respectively: a <= b and a - b <= 0, so there are some rounding disagreements, causing bugs, which, for now, I will not replicate
-    float SweptTrace(Vector3 startPos, Vector3 wishPos)
+    float SweptTrace(Vector3 startPos, Vector3 wishPos, out RaycastHit hit)
     {
-        float completed = 1.0f;
         Vector3 wishmove = wishPos - startPos;
         float wishdist = wishmove.magnitude;
         Vector3 wishdir = new Vector3(wishmove.x, wishmove.y, wishmove.z).normalized;
+        float ret = 1.0f;
+        hit = new RaycastHit();
 
         //shouldn't need to correct in the other direction to get -dir as normal, since there is a bit of offset on collisions
         RaycastHit[] hits = Physics.BoxCastAll(
-            transform.position,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), //handle crouch
+            startPos,
+            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
             wishdir,
             Quaternion.identity,
             wishdist,
@@ -383,15 +394,326 @@ public class PlayerMovement : MonoBehaviour
             QueryTriggerInteraction.Ignore
         );
 
-        if (hits.Length > 0) {
-            // collision is hits[0]
+        //man, why does unity have to be like this?
+        //unswept checks are exact, this isn't, so checking to unswept traces for safety
+        //now at the bottom of a slope it, too is too close for the cast, so it is also discarded and we clip into it
+        //halfextents seem too large, but how?
+
+        //sort hits by distance
+        Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        List<RaycastHit> trueHits = new List<RaycastHit>();
+
+        //check hits by overlapbox at the distance where they hit (and a bit farther as well in case there is offset on boxcast (which, there is))
+        //cost will fucking skyrocket for this, but it is the most robust way to do things
+        for (int i = 0; i < hits.Length; ++i)
+        {
+            Vector3 otherPoint;
+            Vector3 thisPoint; //raycast from here towards wishdir to get true distance and contactpoint
+            Vector3 colPoint;
+            /*if (hits[i].distance != 0f)
+            {
+                otherPoint = hits[i].point;
+                if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint))
+                {
+                    float dist = (otherPoint - colPoint).magnitude;
+                    RaycastHit route = new RaycastHit();
+                    route.distance = dist;
+                    route.point = otherPoint;
+                    route.normal = hits[i].normal;
+                    trueHits.Add(route);
+                }
+            }
+            else //0 distance intersection, need to find 2 closest points
+            {*/
+                //computepenetration methods
+
+                FindContactPoint(hits[i].collider, startPos, hits[i].distance * wishdir, out otherPoint, out thisPoint); //uses ClosesPoint to find the points on 2 colliders closest to each other
+                //this is some precise shit
+                //if mario64 can afford 3 raycasts per frame for the shadow rendering, I can afford one to have perfect collisions
+                if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint)) //TODO: crouch; finds if contact is true or just unity's offset
+                {
+                    float dist = (otherPoint - colPoint).magnitude;
+                    RaycastHit route = new RaycastHit();
+                    route.distance = dist;
+                    Debug.Log("r");
+                    Debug.Log(dist);
+                    route.point = otherPoint;
+                    Debug.Log(otherPoint);
+                    route.normal = GetNormalAtPoint(hits[i].collider, otherPoint);
+                    Debug.Log(route.normal);
+                    //how do I set the normal (the normal of hits[i].collider at route.point)?
+                    trueHits.Add(route);
+                }
+            //}
+        }
+        trueHits.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+        if (trueHits.Count > 0)
+        {
+            hit = trueHits[0];
+            ret = hit.distance / wishdist;
         }
 
-        return completed;
+        return ret;
     }
+
+    Vector3 Move(int depth, float timeLeft, Vector3 startPos)
+    {
+        Vector3 ret = startPos;
+        if (depth < 0)
+        {
+            return ret;
+        }
+        Vector3 wishpos = startPos + velocity * timeLeft;
+        RaycastHit hit;
+        float completed = SweptTrace(startPos, wishpos, out hit);
+        if (completed >= 1.0f)
+        {
+            return wishpos;
+        }
+        if (hit.distance == 0f) //overlap at start
+        {
+            //stuck in something, if by going towards endPos, we leave it, move to where it the box would fully leave the collider, that is the distance traveled
+            //if cannot escape, just end with startPos
+            //for now...
+            //return Move(depth - 1, timeLeft - completed * timeLeft, startPos + (wishpos - startPos) * completed + surfaceExtention * hit.normal);
+        }
+        else
+        {
+            velocity = velocity - Vector3.Dot(velocity, hit.normal) * hit.normal;
+        }
+
+        return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized));
+    }
+    // Notes: For colliders that overlap the box at the start of the sweep,
+    // RaycastHit.normal is set opposite to the direction of the sweep,
+    // RaycastHit.distance is set to zero,
+    // and the zero vector gets returned in RaycastHit.point.
+    // You might want to check whether this is the case in your particular query and perform additional queries to refine the result.
+    // this can be useful for starting in a wall and leaving it and being fully stuck without being able to leave so we just return start
     
     float BoolToFloat(bool b)
     {
         return b ? 1f : 0f;
+    }
+
+    Vector3 Max(Vector3 a, Vector3 b, Vector3 along)
+    {
+        //problem: this is the opposite direction when too close, because boxcastall sucks
+        return Vector3.Dot(along, a) > Vector3.Dot(along, b) ? a : b;
+    }
+
+    float FindContactPoint(Collider other, Vector3 startPos, Vector3 offset, out Vector3 otherPoint, out Vector3 thisPoint)
+    {
+        //costly as fuck
+        BoxCollider test = gameObject.AddComponent<BoxCollider>();
+        test.center = new Vector3(offset.x / boundingBoxWidth, offset.y / standingBoundingBoxHeight, offset.z / boundingBoxWidth); //this scales with localscale, lmao; TODO: handle crouching
+        Vector3 otherPoint1 = other.ClosestPoint(startPos + offset); //ClosestPointOnBounds / ClosestPoint
+        Vector3 thisPoint1 = test.ClosestPoint(other.gameObject.transform.position);
+        Vector3 otherPoint2 = other.ClosestPoint(thisPoint1);
+        Vector3 thisPoint2 = test.ClosestPoint(otherPoint1);
+        Vector3 interPoint;
+        if (CheckLineIntersection(otherPoint1, otherPoint2, thisPoint1, thisPoint2, out interPoint) >= 0f)
+        {
+            otherPoint = other.ClosestPoint(interPoint);
+            thisPoint = test.ClosestPoint(interPoint);
+            Debug.Log("non-par");
+        }
+        else
+        {
+            otherPoint = other.ClosestPoint(thisPoint1 + (thisPoint2 - thisPoint1) / 2f);
+            thisPoint = test.ClosestPoint(otherPoint1 + (otherPoint2 - otherPoint1) / 2f);
+            Debug.Log("par");
+        }
+        /*Debug.Log(other.gameObject);
+        Debug.Log(startPos + offset);
+        Debug.Log(interPoint);
+        Debug.Log(otherPoint);
+        Debug.Log(thisPoint);
+        */
+        Destroy(test);
+
+        return Vector3.Distance(thisPoint, otherPoint);
+    }
+
+    bool CheckLineBoxIntersection(Vector3 point, Vector3 direction, Vector3 boxCenter, Vector3 boxDimensions, out Vector3 intersectionPoint)
+    {
+        Vector3 halfDimensions = boxDimensions / 2;
+
+        Vector3 boxMin = boxCenter - halfDimensions;
+        Vector3 boxMax = boxCenter + halfDimensions;
+
+        float tMinX = (boxMin.x - point.x) / direction.x;
+        float tMaxX = (boxMax.x - point.x) / direction.x;
+
+        float tMinY = (boxMin.y - point.y) / direction.y;
+        float tMaxY = (boxMax.y - point.y) / direction.y;
+
+        float tMinZ = (boxMin.z - point.z) / direction.z;
+        float tMaxZ = (boxMax.z - point.z) / direction.z;
+
+        float entryT = Math.Max(Math.Max(Math.Min(tMinX, tMaxX), Math.Min(tMinY, tMaxY)), Math.Min(tMinZ, tMaxZ));
+        float exitT = Math.Min(Math.Min(Math.Max(tMinX, tMaxX), Math.Max(tMinY, tMaxY)), Math.Max(tMinZ, tMaxZ));
+
+        if (entryT <= exitT && exitT >= 0)
+        {
+            intersectionPoint = point + entryT * direction;
+            return true;
+        }
+
+        intersectionPoint = Vector3.zero; 
+        return false;
+    }
+
+    Vector3 GetNormalAtPoint(Collider collider, Vector3 contactPoint) //works sometimes for non rotated stuff, but has side priority as the player is not a point, might need to use some odd offsets
+    {
+        Quaternion colliderRot = collider.gameObject.transform.rotation;
+        if (collider is MeshCollider meshCollider && !meshCollider.convex)
+        {
+            Vector3[] vertices = meshCollider.sharedMesh.vertices;
+            Vector3[] normals = meshCollider.sharedMesh.normals;
+
+            Vector3 localContactPoint = meshCollider.transform.InverseTransformPoint(contactPoint);
+
+            Vector3 nearest = Vector3.zero;
+            float shortestDistance = float.MaxValue;
+            int nearestIndex = -1;
+
+            for (int i = 0; i < vertices.Length; i++)
+            {
+                Vector3 worldVertex = meshCollider.transform.TransformPoint(vertices[i]);
+                float distance = Vector3.Distance(worldVertex, contactPoint);
+
+                if (distance < shortestDistance)
+                {
+                    shortestDistance = distance;
+                    nearest = worldVertex;
+                    nearestIndex = i;
+                }
+            }
+
+            return (nearestIndex >= 0) ? normals[nearestIndex].normalized : Vector3.up;
+        }
+        else if (collider is BoxCollider boxCollider) //TODO: edges and problem when y is involves, due to not being a cube
+        {
+            Vector3 localPoint = boxCollider.transform.InverseTransformPoint(contactPoint);
+            //localPoint = Quaternion.Inverse(colliderRot) * localPoint;
+
+            float absoluteX = Mathf.Abs(localPoint.x - boxCollider.center.x);
+            float absoluteY = Mathf.Abs(localPoint.y - boxCollider.center.y);
+            float absoluteZ = Mathf.Abs(localPoint.z - boxCollider.center.z);
+
+            Vector3 ret = Vector3.zero;
+
+            if (absoluteX >= absoluteY && absoluteX >= absoluteZ)
+            {
+                ret += new Vector3(Mathf.Sign(localPoint.x), 0, 0);
+            }
+            if (absoluteY >= absoluteZ && absoluteY >= absoluteX)
+            {
+                ret += new Vector3(0, Mathf.Sign(localPoint.y), 0);
+            }
+            if (absoluteZ >= absoluteY && absoluteZ >= absoluteX)
+            {
+                ret += new Vector3(0, 0, Mathf.Sign(localPoint.z));
+            }
+            ret = colliderRot * ret;
+            return ret.normalized;
+        }
+        else if (collider is SphereCollider sphereCollider)
+        {
+            Vector3 centerToPoint = contactPoint - sphereCollider.transform.position;
+            return centerToPoint.normalized;
+        }
+        else if (collider is CapsuleCollider capsuleCollider) //this only works for upright ones
+        {
+            Vector3 halfHeight = capsuleCollider.height / 2 * Vector3.up;
+            Vector3 bottom = capsuleCollider.transform.position - halfHeight;
+            Vector3 top = capsuleCollider.transform.position + halfHeight;
+
+            Vector3 closestPointOnCapsule = Vector3.Lerp(bottom, top, Mathf.Clamp01(Vector3.Dot(contactPoint - bottom, top - bottom) / capsuleCollider.height));
+            Vector3 direction = contactPoint - closestPointOnCapsule;
+
+            return direction.normalized;
+        }
+
+        return Vector3.up;
+    }
+
+    float CheckLineIntersection(Vector3 p1, Vector3 p2, Vector3 q1, Vector3 q2, out Vector3 interPoint)
+    {
+        const float EPS = 1e-6f;
+
+        Vector3 d1 = p2 - p1;
+        Vector3 d2 = q2 - q1;
+        Vector3 r = p1 - q1;
+
+        float a = Vector3.Dot(d1, d1);
+        float e = Vector3.Dot(d2, d2);
+        float f = Vector3.Dot(d2, r);
+
+        float s, t;
+
+        if (Vector3.Cross(d1, d2).sqrMagnitude < EPS)
+        {
+            interPoint = Vector3.zero;
+            return -1f;
+        }
+
+        if (a <= EPS && e <= EPS)
+        {
+            interPoint = (p1 + q1) * 0.5f;
+            return Vector3.Distance(p1, q1);
+        }
+
+        if (a <= EPS)
+        {
+            s = 0f;
+            t = Mathf.Clamp01(f / e);
+        }
+        else
+        {
+            float c = Vector3.Dot(d1, r);
+
+            if (e <= EPS)
+            {
+                t = 0f;
+                s = Mathf.Clamp01(-c / a);
+            }
+            else
+            {
+                float b = Vector3.Dot(d1, d2);
+                float denom = a * e - b * b;
+
+                if (denom != 0f)
+                    s = Mathf.Clamp01((b * f - c * e) / denom);
+                else
+                    s = 0f;
+
+                float tNom = (b * s + f);
+
+                if (tNom < 0f)
+                {
+                    t = 0f;
+                    s = Mathf.Clamp01(-c / a);
+                }
+                else if (tNom > e)
+                {
+                    t = 1f;
+                    s = Mathf.Clamp01((b - c) / a);
+                }
+                else
+                {
+                    t = tNom / e;
+                }
+            }
+        }
+
+        Vector3 closestP = p1 + d1 * s;
+        Vector3 closestQ = q1 + d2 * t;
+
+        interPoint = (closestP + closestQ) * 0.5f;
+
+        return Vector3.Distance(closestP, closestQ);
     }
 }
