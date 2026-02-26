@@ -65,7 +65,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 newPos = this.gameObject.transform.position;
 
         //  1. If stuck, attempt to find free space and skip to step 14,
-        if (!UnsweptTrace())
+        if (UnsweptTrace())
         {
             //TODO: attempt to find free space
         }
@@ -104,6 +104,7 @@ public class PlayerMovement : MonoBehaviour
             //  9. Movement and collisions,
             //TODO
             newPos = this.gameObject.transform.position + velocity * Time.deltaTime;
+            Debug.Log(velocity);
             //handle step up on collision, step down at the end of frame
 
             // 10. Check for ground to stand on,
@@ -353,12 +354,13 @@ public class PlayerMovement : MonoBehaviour
     {
         Collider[] colliders = Physics.OverlapBox(
             transform.position,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f,
+            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //surfaceextention?
             transform.rotation, //I mean, this is axis aligned, and unnecessary, but sure
             colliderMask
         );
         if (colliders.Length > 0)
         {
+            Debug.Log(colliders[0].gameObject);
             return true;
         }
         return false;
