@@ -383,7 +383,7 @@ public class PlayerMovement : MonoBehaviour
         float ret = 1.0f;
         hit = new RaycastHit();
 
-        //shouldn't need to correct in the other direction to get -dir as normal, since there is a bit of offset on collisions
+        //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
         RaycastHit[] hits = Physics.BoxCastAll(
             startPos,
             new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
@@ -394,57 +394,31 @@ public class PlayerMovement : MonoBehaviour
             QueryTriggerInteraction.Ignore
         );
 
-        //man, why does unity have to be like this?
-        //unswept checks are exact, this isn't, so checking to unswept traces for safety
-        //now at the bottom of a slope it, too is too close for the cast, so it is also discarded and we clip into it
-        //halfextents seem too large, but how?
-
-        //sort hits by distance
+        //sort hits by distance, with bad slopes and directions 0-distance hits are actually either wrong or at a different distance, so we cannot just keep the first one
         Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        //do axis aligned bounding box maths for better collision, currently doing some unnecessary raycast hacks, that do not work
         List<RaycastHit> trueHits = new List<RaycastHit>();
 
-        //check hits by overlapbox at the distance where they hit (and a bit farther as well in case there is offset on boxcast (which, there is))
-        //cost will fucking skyrocket for this, but it is the most robust way to do things
         for (int i = 0; i < hits.Length; ++i)
         {
             Vector3 otherPoint;
             Vector3 thisPoint; //raycast from here towards wishdir to get true distance and contactpoint
             Vector3 colPoint;
-            /*if (hits[i].distance != 0f)
-            {
-                otherPoint = hits[i].point;
-                if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint))
-                {
-                    float dist = (otherPoint - colPoint).magnitude;
-                    RaycastHit route = new RaycastHit();
-                    route.distance = dist;
-                    route.point = otherPoint;
-                    route.normal = hits[i].normal;
-                    trueHits.Add(route);
-                }
-            }
-            else //0 distance intersection, need to find 2 closest points
-            {*/
-                //computepenetration methods
+            //computepenetration methods
 
-                FindContactPoint(hits[i].collider, startPos, hits[i].distance * wishdir, out otherPoint, out thisPoint); //uses ClosesPoint to find the points on 2 colliders closest to each other
-                //this is some precise shit
-                //if mario64 can afford 3 raycasts per frame for the shadow rendering, I can afford one to have perfect collisions
-                if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint)) //TODO: crouch; finds if contact is true or just unity's offset
-                {
-                    float dist = (otherPoint - colPoint).magnitude;
-                    RaycastHit route = new RaycastHit();
-                    route.distance = dist;
-                    Debug.Log("r");
-                    Debug.Log(dist);
-                    route.point = otherPoint;
-                    Debug.Log(otherPoint);
-                    route.normal = GetNormalAtPoint(hits[i].collider, otherPoint);
-                    Debug.Log(route.normal);
-                    //how do I set the normal (the normal of hits[i].collider at route.point)?
-                    trueHits.Add(route);
-                }
-            //}
+            FindContactPoint(hits[i].collider, startPos, hits[i].distance * wishdir, out otherPoint, out thisPoint); //uses ClosesPoint to find the points on 2 colliders closest to each other
+            //this is some precise shit
+            //if mario64 can afford 3 raycasts per frame for the shadow rendering, I can afford one to have perfect collisions
+            if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint)) //TODO: crouch; finds if contact is true or just unity's offset
+            {
+                float dist = (otherPoint - colPoint).magnitude;
+                RaycastHit route = new RaycastHit();
+                route.distance = dist;
+                route.point = otherPoint;
+                route.normal = GetNormalAtPoint(hits[i].collider, otherPoint);
+                trueHits.Add(route);
+            }
         }
         trueHits.Sort((a, b) => a.distance.CompareTo(b.distance));
 
@@ -517,20 +491,12 @@ public class PlayerMovement : MonoBehaviour
         {
             otherPoint = other.ClosestPoint(interPoint);
             thisPoint = test.ClosestPoint(interPoint);
-            Debug.Log("non-par");
         }
         else
         {
             otherPoint = other.ClosestPoint(thisPoint1 + (thisPoint2 - thisPoint1) / 2f);
             thisPoint = test.ClosestPoint(otherPoint1 + (otherPoint2 - otherPoint1) / 2f);
-            Debug.Log("par");
         }
-        /*Debug.Log(other.gameObject);
-        Debug.Log(startPos + offset);
-        Debug.Log(interPoint);
-        Debug.Log(otherPoint);
-        Debug.Log(thisPoint);
-        */
         Destroy(test);
 
         return Vector3.Distance(thisPoint, otherPoint);
