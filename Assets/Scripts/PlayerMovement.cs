@@ -54,6 +54,8 @@ public class PlayerMovement : MonoBehaviour
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
 
+    private SweptTraces tracer;
+
     List<Vector3> poss = new List<Vector3>();
     List<Vector3> dirst = new List<Vector3>();
 
@@ -62,6 +64,7 @@ public class PlayerMovement : MonoBehaviour
     {
         cameraTf = GetComponentInChildren<Camera>().GetComponent<Transform>();
         boundingBox = GetComponent<BoxCollider>();
+        tracer = GetComponent<SweptTraces>();
         //Physics.defaultContactOffset = 0;
         // GroundCheck(this.gameObject.transform.position);
     }
@@ -367,9 +370,12 @@ public class PlayerMovement : MonoBehaviour
             Quaternion.identity,
             colliderMask
         );
-        if (colliders.Length > 0)
+        for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            return true;
+            if (tracer.GJKPointInside(colliders[i].gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -380,7 +386,6 @@ public class PlayerMovement : MonoBehaviour
         Vector3 wishmove = wishPos - startPos;
         float wishdist = wishmove.magnitude;
         Vector3 wishdir = new Vector3(wishmove.x, wishmove.y, wishmove.z).normalized;
-        float ret = 1.0f;
         hit = new RaycastHit();
 
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
@@ -396,25 +401,15 @@ public class PlayerMovement : MonoBehaviour
 
         //sort hits by distance, with bad slopes and directions 0-distance hits are actually either wrong or at a different distance, so we cannot just keep the first one
         Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-        //do axis aligned bounding box maths for better collision, currently doing some unnecessary raycast hacks, that do not work
-        List<RaycastHit> trueHits = new List<RaycastHit>();
-
         for (int i = 0; i < hits.Length; ++i)
         {
-            //TODO: real collisions against axis aligned bounding box
-            //every collider is meshcollider
-            //use GJK
+            if (tracer.GJKSweptIntersects(hits[i].collider.gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            {
+                hit = hits[0];
+                return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
+            }
         }
-        trueHits.Sort((a, b) => a.distance.CompareTo(b.distance));
-
-        if (trueHits.Count > 0)
-        {
-            hit = trueHits[0];
-            ret = hit.distance / wishdist;
-        }
-
-        return ret;
+        return 1f;
     }
 
     Vector3 Move(int depth, float timeLeft, Vector3 startPos)

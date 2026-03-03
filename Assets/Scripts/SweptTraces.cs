@@ -1,11 +1,19 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System;
 
 public class SweptTraces : MonoBehaviour
 {
     // minkowski sum and GJK as explained here:
     // https://www.youtube.com/watch?v=Qupqu1xe7Io
-    public Vector3 SupportPlayerBox(Vector3 direction, Vector3 halfExtents) //bounds of axis-aligned bounding box, support to find the best vertex, doesn't take playertransform, just around 000; might replace wiht player meshcollider, so it works with other shapes
+    // and coded here:
+    // https://github.com/kujukuju/KodaPhysics/blob/master/src/Gjk.jai
+
+
+    //currently enough to check unswept traces, and collisions in swept hull, but not time of impact or closest point or separation
+
+    //you can rotete direction by (opposite of) player rotation if player is rotated
+    Vector3 SupportPlayerBox(Vector3 direction, Vector3 halfExtents) //bounds of axis-aligned bounding box, support to find the best vertex, doesn't take playertransform, just around 000; might replace wiht player meshcollider, so it works with other shapes
     {
         return new Vector3(
             direction.x >= 0 ? halfExtents.x : -halfExtents.x, //avoid centre of edges being returned as vertices
@@ -14,7 +22,15 @@ public class SweptTraces : MonoBehaviour
         );
     }
 
-    public Vector3 SupportMesh(Vector3 direction, MeshCollider meshCollider) //bounds of mesh collider, returns world-space vertices
+    //get convex hull of all points playercollision covered during movement
+    //if the wishdir points towards dir, the already maximum pushed by wishdir will be further, and still the maximum in pushed shape
+    Vector3 SupportSweptBox(Vector3 direction, Vector3 halfExtents, Vector3 wishMove)
+    {
+        Vector3 unswept = SupportPlayerBox(direction, halfExtents);
+        return Vector3.Dot(direction, wishMove) > 0f ? unswept + wishMove : unswept;
+    }
+
+    Vector3 SupportMesh(Vector3 direction, MeshCollider meshCollider) //bounds of mesh collider, returns world-space vertices
     {
         Transform meshTransform = meshCollider.transform;
         Mesh mesh = meshCollider.sharedMesh;
@@ -36,10 +52,17 @@ public class SweptTraces : MonoBehaviour
         return bestVertex;
     }
 
-    public Vector3 SupportMinkowskiDiff(Vector3 direction, MeshCollider meshCollider, Vector3 playerHalfExtents, Vector3 playerPos) //support function for signed minkowski sum, if replacing player with meshcollider, remove playerpos
+    Vector3 SupportMinkowskiDiff(Vector3 direction, MeshCollider meshCollider, Vector3 playerHalfExtents, Vector3 playerPos) //support function for signed minkowski sum, if replacing player with meshcollider, remove playerpos
     {
         Vector3 meshSupport = SupportMesh(direction, meshCollider);
         Vector3 boxSupport = playerPos + SupportPlayerBox(-direction, playerHalfExtents);
+        return meshSupport - boxSupport;
+    }
+
+    Vector3 SupportSweptMinkowskiDiff(Vector3 direction, MeshCollider meshCollider, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove) //support function for signed minkowski sum, if replacing player with meshcollider, remove playerpos
+    {
+        Vector3 meshSupport = SupportMesh(direction, meshCollider);
+        Vector3 boxSupport = playerPos + SupportSweptBox(-direction, playerHalfExtents, wishMove);
         return meshSupport - boxSupport;
     }
 
@@ -56,17 +79,42 @@ public class SweptTraces : MonoBehaviour
     //  if DoSimplex(list of points, direction) -> if true, intersection found, return
 
 
-    bool GJKPointInside(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos)
+    public bool GJKPointInside(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos)
     {
-        // Initialise with a random support point
+        //random support point
         Vector3 dir = Vector3.one;
         Vector3 S = SupportMinkowskiDiff(dir, mesh, playerHalfExtents, playerPos);
         var simplex = new List<Vector3> { S };
-        dir = -S; // vector from simplex point to origin
+        dir = -S; //vector from simplex point to origin
 
-        for (int i = 0; i < 20; i++) // max iterations
+        for (int i = 0; i < 30; i++) //max iterations could be 20
         {
             Vector3 A = SupportMinkowskiDiff(dir, mesh, playerHalfExtents, playerPos);
+
+            if (Vector3.Dot(A, dir) < 0) //no intersection
+            {
+                return false;
+            }
+            simplex.Add(A);
+            if (DoSimplex(simplex, out simplex, out dir))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public bool GJKSweptIntersects(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove)
+    {
+        //random support point
+        Vector3 dir = Vector3.one;
+        Vector3 S = SupportSweptMinkowskiDiff(dir, mesh, playerHalfExtents, playerPos, wishMove);
+        var simplex = new List<Vector3> { S };
+        dir = -S; //vector from simplex point to origin
+
+        for (int i = 0; i < 30; i++) //max iterations could be 40
+        {
+            Vector3 A = SupportSweptMinkowskiDiff(dir, mesh, playerHalfExtents, playerPos, wishMove);
 
             if (Vector3.Dot(A, dir) < 0) //no intersection
             {
@@ -127,10 +175,10 @@ public class SweptTraces : MonoBehaviour
     {
         newSimplex = simplex;
         dir = -simplex[0];
-        if (dir.sqrMagnitude < 1e-12f) //if too close, intersect (shouldn't need to, but at exactly 0 0 0, things might mess up, just be safe)
+        /*if (dir.sqrMagnitude < 1e-12f) //if too close, intersect (shouldn't need to, but at exactly 0 0 0, things might mess up, just be safe)
         {
             return true;
-        }
+        }*/
         return false;
     }
 
@@ -148,7 +196,7 @@ public class SweptTraces : MonoBehaviour
             newSimplex = new List<Vector3> {A};
             dir = AO;
         }
-        if (dir.sqrMagnitude < 1e-12f) //if too close, intersect (shouldn't need to, but at exactly 0 0 0, things might mess up, just be safe)
+        /*if (dir.sqrMagnitude < 1e-12f) //if too close, intersect (shouldn't need to, but at exactly 0 0 0, things might mess up, just be safe)
         {
             newSimplex = new List<Vector3> { simplex[1] };
             dir = -simplex[1];
@@ -156,7 +204,7 @@ public class SweptTraces : MonoBehaviour
             {
                 return true;
             }
-        }
+        }*/
         return false;
     }
 
@@ -214,7 +262,7 @@ public class SweptTraces : MonoBehaviour
                 }
             }
         }
-        if (dir.sqrMagnitude < 1e-12f)
+        /*if (dir.sqrMagnitude < 1e-12f)
         {
             newSimplex = new List<Vector3> { simplex[1] };
             dir = -simplex[1];
@@ -222,64 +270,70 @@ public class SweptTraces : MonoBehaviour
             {
                 return true;
             }
-        }
+        }*/
         return false;
     }
 
-    bool TetrahedronSimplex(List<Vector3> simplex, out List<Vector3> newSimplex, out Vector3 dir) //unsure about this one... https://github.com/kujukuju/KodaPhysics/blob/master/src/GjkComplex.jai
+    bool TetrahedronSimplex(List<Vector3> simplex, out List<Vector3> newSimplex, out Vector3 dir) //unsure about this one...
     {
         Vector3 A = simplex[3]; Vector3 B = simplex[2]; Vector3 C = simplex[1]; Vector3 D = simplex[0];
-        Vector3 AO = -A; Vector3 ABC = Vector3.Cross(B - A, C - A); Vector3 ACD = Vector3.Cross(C - A, D - A); Vector3 ADB = Vector3.Cross(D - A, B - A);
-        bool outsideABC = Vector3.Dot(ABC, AO) > 0; bool outsideACD = Vector3.Dot(ACD, AO) > 0; bool outsideADB = Vector3.Dot(ADB, AO) > 0;
-        if (!outsideABC && !outsideACD && !outsideADB)
+        Vector3 AO = -A; Vector3 ABC = Vector3.Cross(B - A, C - A); Vector3 ACD = Vector3.Cross(C - A, D - A); Vector3 ADB = Vector3.Cross(D - A, B - A); Vector3 BCD = Vector3.Cross(C - B, D - B);
+        if (Vector3.Dot(ABC, D - A) > 0) //if normals pointing inward, make them point outward, should be unnecessary based on how I calculate them
         {
-            newSimplex = simplex;
-            dir = AO;
-            return true;
+            ABC = -ABC;
         }
-        List<(List<Vector3> simp, Vector3 dir, float dist2)> candidates = new List<(List<Vector3>, Vector3, float)>();
+        if (Vector3.Dot(ACD, B - A) > 0)
+        {
+            ACD = -ACD;
+        }
+        if (Vector3.Dot(ADB, C - A) > 0)
+        {
+            ADB = -ADB;
+        }
+        bool outsideABC = Vector3.Dot(ABC, AO) > 0; bool outsideACD = Vector3.Dot(ACD, AO) > 0; bool outsideADB = Vector3.Dot(ADB, AO) > 0; //bool outsideBCD = Vector3.Dot(BCD, -B) > 0;
+        newSimplex = simplex;
+        dir = AO;
         if (outsideABC)
         {
-            List<Vector3> tri = new List<Vector3> { C, B, A };
-            if (TriangleSimplex(tri, out var newTri, out var d))
-            {
-                candidates.Add((newTri, d, d.sqrMagnitude));
-            }
+            simplex[0] = C; //remove D, as that is furthest
+            simplex[1] = B; //shift all others
+            simplex[2] = A; //keep A as newest
+            simplex.RemoveAt(3);
+            return TriangleSimplex(simplex, out newSimplex, out dir);
         }
         if (outsideACD)
         {
-            List<Vector3> tri = new List<Vector3> { D, C, A };
-            if (TriangleSimplex(tri, out var newTri, out var d))
-            {
-                candidates.Add((newTri, d, d.sqrMagnitude));
-            }
+            simplex[0] = D; //these two remain the same and will be outoptimised but for readability they are here
+            simplex[1] = C;
+            simplex[2] = A; //shift A to B, as that is furthest, while keeping A as newest
+            simplex.RemoveAt(3);
+            return TriangleSimplex(simplex, out newSimplex, out dir);
         }
         if (outsideADB)
         {
-            List<Vector3> tri = new List<Vector3> { B, D, A };
-            if (TriangleSimplex(tri, out var newTri, out var d))
-            {
-                candidates.Add((newTri, d, d.sqrMagnitude));
-            }
+            simplex[0] = B;
+            simplex[1] = D;
+            simplex[2] = A;
+            simplex.RemoveAt(3);
+            return TriangleSimplex(simplex, out newSimplex, out dir);
         }
-        if (candidates.Count == 0) //problems happened
+        /*if (outsideBCD) //this shouldn't happen and might have the wrong point as A, but that is unlikely as the later in the simplex a point is, the closer to the origin it is
         {
-            //fallback options
-            dir = -A;
-            newSimplex = new List<Vector3> { A };
-            return false;
-            //newSimplex = new List<Vector3> { A, B, C };
-            //dir = Vector3.Cross(Vector3.Cross(C - A, B - A), (B - A));
-            //return false;
-        }
-        candidates.Sort((x, y) => x.dist2.CompareTo(y.dist2));
-        newSimplex = candidates[0].simp;
-        dir = candidates[0].dir;
-        if (dir.sqrMagnitude < 1e-12f)
-        {
-            return true;
-        }
-        return false;
+            simplex[0] = D;
+            simplex[1] = C;
+            simplex[2] = B;
+            simplex.RemoveAt(3);
+            return TriangleSimplex(simplex, out newSimplex, out dir);
+        }*/
+        newSimplex = simplex;
+        dir = AO;
+        return true;
+    }
+
+    Vector3 PickClosestToOrigin(List<Vector3> simplex) //usually this should just be -dir, no?
+    {
+        simplex.Sort((x, y) => x.magnitude.CompareTo(y.magnitude));
+        return simplex[0];
     }
 
     //support of a curve is "easy", for spheres you just take the center + radius * direction; any other curve that has a function can be derived along the direction to find a maximum
