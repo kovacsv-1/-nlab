@@ -6,6 +6,7 @@ public class SweptTraces : MonoBehaviour
 {
     // minkowski sum and GJK as explained here:
     // https://www.youtube.com/watch?v=Qupqu1xe7Io
+    // well optimized, but doesn't give closest points/normals, currently used for double-checking boxcast results
     // and coded here:
     // https://github.com/kujukuju/KodaPhysics/blob/master/src/Gjk.jai
 
@@ -328,12 +329,6 @@ public class SweptTraces : MonoBehaviour
         newSimplex = simplex;
         dir = AO;
         return true;
-    }
-
-    Vector3 PickClosestToOrigin(List<Vector3> simplex) //usually this should just be -dir, no?
-    {
-        simplex.Sort((x, y) => x.magnitude.CompareTo(y.magnitude));
-        return simplex[0];
     }
 
     //support of a curve is "easy", for spheres you just take the center + radius * direction; any other curve that has a function can be derived along the direction to find a maximum
