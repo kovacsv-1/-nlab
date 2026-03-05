@@ -54,6 +54,8 @@ public class PlayerMovement : MonoBehaviour
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
 
+    private SweptTraces tracer;
+
     List<Vector3> poss = new List<Vector3>();
     List<Vector3> dirst = new List<Vector3>();
 
@@ -62,6 +64,7 @@ public class PlayerMovement : MonoBehaviour
     {
         cameraTf = GetComponentInChildren<Camera>().GetComponent<Transform>();
         boundingBox = GetComponent<BoxCollider>();
+        tracer = GetComponent<SweptTraces>();
         //Physics.defaultContactOffset = 0;
         // GroundCheck(this.gameObject.transform.position);
     }
@@ -367,10 +370,12 @@ public class PlayerMovement : MonoBehaviour
             Quaternion.identity,
             colliderMask
         );
-        if (colliders.Length > 0)
+        for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            Debug.Log(colliders[0].gameObject);
-            return true;
+            if (tracer.GJKPointInside(colliders[i].gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            {
+                return true;
+            }
         }
         return false;
     }
@@ -381,7 +386,6 @@ public class PlayerMovement : MonoBehaviour
         Vector3 wishmove = wishPos - startPos;
         float wishdist = wishmove.magnitude;
         Vector3 wishdir = new Vector3(wishmove.x, wishmove.y, wishmove.z).normalized;
-        float ret = 1.0f;
         hit = new RaycastHit();
 
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
@@ -397,39 +401,15 @@ public class PlayerMovement : MonoBehaviour
 
         //sort hits by distance, with bad slopes and directions 0-distance hits are actually either wrong or at a different distance, so we cannot just keep the first one
         Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-
-        //do axis aligned bounding box maths for better collision, currently doing some unnecessary raycast hacks, that do not work
-        List<RaycastHit> trueHits = new List<RaycastHit>();
-
         for (int i = 0; i < hits.Length; ++i)
         {
-            Vector3 otherPoint;
-            Vector3 thisPoint; //raycast from here towards wishdir to get true distance and contactpoint
-            Vector3 colPoint;
-            //computepenetration methods
-
-            FindContactPoint(hits[i].collider, startPos, hits[i].distance * wishdir, out otherPoint, out thisPoint); //uses ClosesPoint to find the points on 2 colliders closest to each other
-            //this is some precise shit
-            //if mario64 can afford 3 raycasts per frame for the shadow rendering, I can afford one to have perfect collisions
-            if (CheckLineBoxIntersection(otherPoint, -wishdir, startPos, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth), out colPoint)) //TODO: crouch; finds if contact is true or just unity's offset
+            if (tracer.GJKSweptIntersects(hits[i].collider.gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
-                float dist = (otherPoint - colPoint).magnitude;
-                RaycastHit route = new RaycastHit();
-                route.distance = dist;
-                route.point = otherPoint;
-                route.normal = GetNormalAtPoint(hits[i].collider, otherPoint);
-                trueHits.Add(route);
+                hit = hits[0];
+                return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
             }
         }
-        trueHits.Sort((a, b) => a.distance.CompareTo(b.distance));
-
-        if (trueHits.Count > 0)
-        {
-            hit = trueHits[0];
-            ret = hit.distance / wishdist;
-        }
-
-        return ret;
+        return 1f;
     }
 
     Vector3 Move(int depth, float timeLeft, Vector3 startPos)
@@ -476,211 +456,5 @@ public class PlayerMovement : MonoBehaviour
     {
         //problem: this is the opposite direction when too close, because boxcastall sucks
         return Vector3.Dot(along, a) > Vector3.Dot(along, b) ? a : b;
-    }
-
-    float FindContactPoint(Collider other, Vector3 startPos, Vector3 offset, out Vector3 otherPoint, out Vector3 thisPoint)
-    {
-        //costly as fuck
-        BoxCollider test = gameObject.AddComponent<BoxCollider>();
-        test.center = new Vector3(offset.x / boundingBoxWidth, offset.y / standingBoundingBoxHeight, offset.z / boundingBoxWidth); //this scales with localscale, lmao; TODO: handle crouching
-        Vector3 otherPoint1 = other.ClosestPoint(startPos + offset); //ClosestPointOnBounds / ClosestPoint
-        Vector3 thisPoint1 = test.ClosestPoint(other.gameObject.transform.position);
-        Vector3 otherPoint2 = other.ClosestPoint(thisPoint1);
-        Vector3 thisPoint2 = test.ClosestPoint(otherPoint1);
-        Vector3 interPoint;
-        if (CheckLineIntersection(otherPoint1, otherPoint2, thisPoint1, thisPoint2, out interPoint) >= 0f)
-        {
-            otherPoint = other.ClosestPoint(interPoint);
-            thisPoint = test.ClosestPoint(interPoint);
-        }
-        else
-        {
-            otherPoint = other.ClosestPoint(thisPoint1 + (thisPoint2 - thisPoint1) / 2f);
-            thisPoint = test.ClosestPoint(otherPoint1 + (otherPoint2 - otherPoint1) / 2f);
-        }
-        Destroy(test);
-
-        return Vector3.Distance(thisPoint, otherPoint);
-    }
-
-    bool CheckLineBoxIntersection(Vector3 point, Vector3 direction, Vector3 boxCenter, Vector3 boxDimensions, out Vector3 intersectionPoint)
-    {
-        Vector3 halfDimensions = boxDimensions / 2;
-
-        Vector3 boxMin = boxCenter - halfDimensions;
-        Vector3 boxMax = boxCenter + halfDimensions;
-
-        float tMinX = (boxMin.x - point.x) / direction.x;
-        float tMaxX = (boxMax.x - point.x) / direction.x;
-
-        float tMinY = (boxMin.y - point.y) / direction.y;
-        float tMaxY = (boxMax.y - point.y) / direction.y;
-
-        float tMinZ = (boxMin.z - point.z) / direction.z;
-        float tMaxZ = (boxMax.z - point.z) / direction.z;
-
-        float entryT = Math.Max(Math.Max(Math.Min(tMinX, tMaxX), Math.Min(tMinY, tMaxY)), Math.Min(tMinZ, tMaxZ));
-        float exitT = Math.Min(Math.Min(Math.Max(tMinX, tMaxX), Math.Max(tMinY, tMaxY)), Math.Max(tMinZ, tMaxZ));
-
-        if (entryT <= exitT && exitT >= 0)
-        {
-            intersectionPoint = point + entryT * direction;
-            return true;
-        }
-
-        intersectionPoint = Vector3.zero; 
-        return false;
-    }
-
-    Vector3 GetNormalAtPoint(Collider collider, Vector3 contactPoint) //works sometimes for non rotated stuff, but has side priority as the player is not a point, might need to use some odd offsets
-    {
-        Quaternion colliderRot = collider.gameObject.transform.rotation;
-        if (collider is MeshCollider meshCollider && !meshCollider.convex)
-        {
-            Vector3[] vertices = meshCollider.sharedMesh.vertices;
-            Vector3[] normals = meshCollider.sharedMesh.normals;
-
-            Vector3 localContactPoint = meshCollider.transform.InverseTransformPoint(contactPoint);
-
-            Vector3 nearest = Vector3.zero;
-            float shortestDistance = float.MaxValue;
-            int nearestIndex = -1;
-
-            for (int i = 0; i < vertices.Length; i++)
-            {
-                Vector3 worldVertex = meshCollider.transform.TransformPoint(vertices[i]);
-                float distance = Vector3.Distance(worldVertex, contactPoint);
-
-                if (distance < shortestDistance)
-                {
-                    shortestDistance = distance;
-                    nearest = worldVertex;
-                    nearestIndex = i;
-                }
-            }
-
-            return (nearestIndex >= 0) ? normals[nearestIndex].normalized : Vector3.up;
-        }
-        else if (collider is BoxCollider boxCollider) //TODO: edges and problem when y is involves, due to not being a cube
-        {
-            Vector3 localPoint = boxCollider.transform.InverseTransformPoint(contactPoint);
-            //localPoint = Quaternion.Inverse(colliderRot) * localPoint;
-
-            float absoluteX = Mathf.Abs(localPoint.x - boxCollider.center.x);
-            float absoluteY = Mathf.Abs(localPoint.y - boxCollider.center.y);
-            float absoluteZ = Mathf.Abs(localPoint.z - boxCollider.center.z);
-
-            Vector3 ret = Vector3.zero;
-
-            if (absoluteX >= absoluteY && absoluteX >= absoluteZ)
-            {
-                ret += new Vector3(Mathf.Sign(localPoint.x), 0, 0);
-            }
-            if (absoluteY >= absoluteZ && absoluteY >= absoluteX)
-            {
-                ret += new Vector3(0, Mathf.Sign(localPoint.y), 0);
-            }
-            if (absoluteZ >= absoluteY && absoluteZ >= absoluteX)
-            {
-                ret += new Vector3(0, 0, Mathf.Sign(localPoint.z));
-            }
-            ret = colliderRot * ret;
-            return ret.normalized;
-        }
-        else if (collider is SphereCollider sphereCollider)
-        {
-            Vector3 centerToPoint = contactPoint - sphereCollider.transform.position;
-            return centerToPoint.normalized;
-        }
-        else if (collider is CapsuleCollider capsuleCollider) //this only works for upright ones
-        {
-            Vector3 halfHeight = capsuleCollider.height / 2 * Vector3.up;
-            Vector3 bottom = capsuleCollider.transform.position - halfHeight;
-            Vector3 top = capsuleCollider.transform.position + halfHeight;
-
-            Vector3 closestPointOnCapsule = Vector3.Lerp(bottom, top, Mathf.Clamp01(Vector3.Dot(contactPoint - bottom, top - bottom) / capsuleCollider.height));
-            Vector3 direction = contactPoint - closestPointOnCapsule;
-
-            return direction.normalized;
-        }
-
-        return Vector3.up;
-    }
-
-    float CheckLineIntersection(Vector3 p1, Vector3 p2, Vector3 q1, Vector3 q2, out Vector3 interPoint)
-    {
-        const float EPS = 1e-6f;
-
-        Vector3 d1 = p2 - p1;
-        Vector3 d2 = q2 - q1;
-        Vector3 r = p1 - q1;
-
-        float a = Vector3.Dot(d1, d1);
-        float e = Vector3.Dot(d2, d2);
-        float f = Vector3.Dot(d2, r);
-
-        float s, t;
-
-        if (Vector3.Cross(d1, d2).sqrMagnitude < EPS)
-        {
-            interPoint = Vector3.zero;
-            return -1f;
-        }
-
-        if (a <= EPS && e <= EPS)
-        {
-            interPoint = (p1 + q1) * 0.5f;
-            return Vector3.Distance(p1, q1);
-        }
-
-        if (a <= EPS)
-        {
-            s = 0f;
-            t = Mathf.Clamp01(f / e);
-        }
-        else
-        {
-            float c = Vector3.Dot(d1, r);
-
-            if (e <= EPS)
-            {
-                t = 0f;
-                s = Mathf.Clamp01(-c / a);
-            }
-            else
-            {
-                float b = Vector3.Dot(d1, d2);
-                float denom = a * e - b * b;
-
-                if (denom != 0f)
-                    s = Mathf.Clamp01((b * f - c * e) / denom);
-                else
-                    s = 0f;
-
-                float tNom = (b * s + f);
-
-                if (tNom < 0f)
-                {
-                    t = 0f;
-                    s = Mathf.Clamp01(-c / a);
-                }
-                else if (tNom > e)
-                {
-                    t = 1f;
-                    s = Mathf.Clamp01((b - c) / a);
-                }
-                else
-                {
-                    t = tNom / e;
-                }
-            }
-        }
-
-        Vector3 closestP = p1 + d1 * s;
-        Vector3 closestQ = q1 + d2 * t;
-
-        interPoint = (closestP + closestQ) * 0.5f;
-
-        return Vector3.Distance(closestP, closestQ);
     }
 }
