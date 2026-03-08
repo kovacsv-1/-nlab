@@ -963,6 +963,7 @@ GameObject:
   - component: {fileID: 880500155}
   - component: {fileID: 880500158}
   - component: {fileID: 880500160}
+  - component: {fileID: 880500161}
   - component: {fileID: 880500159}
   m_Layer: 7
   m_Name: Player
@@ -1099,6 +1100,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 37920692455cdd945ad1be7e4022f04f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SweptTraces
+--- !u!114 &880500161
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 880500153}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6fd70450c9140a4c9de8806999832c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::GJKClosest
 --- !u!1 &1131076786
 GameObject:
   m_ObjectHideFlags: 0

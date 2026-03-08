@@ -55,9 +55,32 @@ public class PlayerMovement : MonoBehaviour
     public LayerMask colliderMask;
 
     private SweptTraces tracer;
+    private GJKClosest gjkClosest;
 
     List<Vector3> poss = new List<Vector3>();
     List<Vector3> dirst = new List<Vector3>();
+
+    class ColliderResolver  //to not call a lot of getcomponents
+    {
+        Dictionary<Collider, MeshCollider> map = new Dictionary<Collider, MeshCollider>();
+
+        public MeshCollider ResolveCollider(Collider collider)
+        {
+            if (!map.ContainsKey(collider))
+            {
+                map.Add(collider, collider.gameObject.GetComponent<MeshCollider>());
+            }
+            return map[collider];
+        }
+    }
+
+    ColliderResolver cr = new ColliderResolver();
+
+    struct ColDist
+    {
+        public MeshCollider collider;
+        public float dist;
+    }
 
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
@@ -65,6 +88,7 @@ public class PlayerMovement : MonoBehaviour
         cameraTf = GetComponentInChildren<Camera>().GetComponent<Transform>();
         boundingBox = GetComponent<BoxCollider>();
         tracer = GetComponent<SweptTraces>();
+        gjkClosest = GetComponent<GJKClosest>();
         //Physics.defaultContactOffset = 0;
         // GroundCheck(this.gameObject.transform.position);
     }
@@ -372,7 +396,7 @@ public class PlayerMovement : MonoBehaviour
         );
         for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            if (tracer.GJKPointInside(colliders[i].gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
                 return true;
             }
@@ -399,17 +423,68 @@ public class PlayerMovement : MonoBehaviour
             QueryTriggerInteraction.Ignore
         );
 
+        if (hits.Length == 0)
+        {
+            return 1f;
+        }
+
         //sort hits by distance, with bad slopes and directions 0-distance hits are actually either wrong or at a different distance, so we cannot just keep the first one
         Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+        List<ColDist> collidedWith = new List<ColDist>();
+
         for (int i = 0; i < hits.Length; ++i)
         {
-            if (tracer.GJKSweptIntersects(hits[i].collider.gameObject.GetComponent<MeshCollider>(), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            MeshCollider other = cr.ResolveCollider(hits[i].collider);
+            if (tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
-                hit = hits[0];
-                return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
+                ColDist info = new ColDist();
+                info.collider = other;
+                info.dist = hits[i].distance;
+                collidedWith.Add(info);
             }
         }
-        return 1f;
+
+        if (collidedWith.Count == 0)
+        {
+            return 1f;
+        }
+
+        //List.Sort(collidedWith, (a, b) => a.dist.CompareTo(b.dist)); //only checking true hits, shouldn't need to sort as that is the order added
+        
+        //interate over all collidedwith and gjkclosest + step in the wishdir to distance
+        //until min found hit distance < next estimated hit distance + 1f (or another large margin)
+        //and return the min distance hit's values with
+        float bestDistance = float.PositiveInfinity;
+        GJKHit bestHit = new GJKHit();
+        foreach (var col in collidedWith)
+        {
+            GJKHit gjk = gjkClosest.GJKShapeCast(
+                col.collider,
+                new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f,
+                startPos,
+                wishmove
+            );
+            // If this collider produces a hit and it's closer than the current best, update
+            if (gjk.hit && gjk.distance < bestDistance)
+            {
+                bestDistance = gjk.distance;
+                bestHit = gjk;
+            }
+        }
+        if (bestHit.hit)
+        {
+            hit.distance = bestHit.distance;
+            hit.point = bestHit.point;
+            hit.normal = bestHit.normal;
+            return bestDistance / wishdist;
+        }
+        else
+        {
+            return 1f;
+        }
+
+        //return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
+        return hit.distance / wishdist;
     }
 
     Vector3 Move(int depth, float timeLeft, Vector3 startPos)
@@ -435,6 +510,7 @@ public class PlayerMovement : MonoBehaviour
         }
         else
         {
+            Debug.Log(hit.normal);
             velocity = velocity - Vector3.Dot(velocity, hit.normal) * hit.normal;
         }
 

@@ -253,7 +253,7 @@ public class SweptTraces : MonoBehaviour
         return false;
     }
 
-    bool TetrahedronSimplex(List<Vector3> simplex, out List<Vector3> newSimplex, out Vector3 dir) //unsure about this one...
+    bool TetrahedronSimplex(List<Vector3> simplex, out List<Vector3> newSimplex, out Vector3 dir)
     {
         Vector3 A = simplex[3]; Vector3 B = simplex[2]; Vector3 C = simplex[1]; Vector3 D = simplex[0];
         Vector3 AO = -A; Vector3 ABC = Vector3.Cross(B - A, C - A); Vector3 ACD = Vector3.Cross(C - A, D - A); Vector3 ADB = Vector3.Cross(D - A, B - A); Vector3 BCD = Vector3.Cross(C - B, D - B);
