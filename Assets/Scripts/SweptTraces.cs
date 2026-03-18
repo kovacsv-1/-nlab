@@ -43,7 +43,7 @@ public class SweptTraces : MonoBehaviour
         foreach (Vector3 localVertex in vertices)
         {
             Vector3 worldVertex = meshTransform.TransformPoint(localVertex);
-            float dot = Vector3.Dot(direction, worldVertex);
+            float dot = Vector3.Dot(direction, worldVertex /*- playerPos */);
             if (dot > bestDot)
             {
                 bestDot = dot;
@@ -166,7 +166,6 @@ public class SweptTraces : MonoBehaviour
             case 4:
                 return TetrahedronSimplex(simplex, out newSimplex, out dir);
             default:
-                Debug.Log("huh?");
                 break;
         }
         return false;

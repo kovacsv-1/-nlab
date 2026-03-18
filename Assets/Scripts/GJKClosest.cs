@@ -95,7 +95,7 @@ public class GJKClosest : MonoBehaviour
     // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely, this has some shapecast logic it returns, but shouldn't be used for that
     public GJKHit GJKComplex(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove) { //bool, ComplexSimplex, Vector3, Vector3 is what this should return
         ComplexSimplex simplex = new ComplexSimplex();
-        Vector3 direction = wishMove;
+        Vector3 direction = wishMove.normalized;
         simplex.a1 = SupportPlayerBox(-direction, playerHalfExtents) + playerPos;
         simplex.a2 = SupportMesh(direction, mesh);
         simplex.a = simplex.a2 - simplex.a1;
@@ -103,16 +103,18 @@ public class GJKClosest : MonoBehaviour
         ComplexSimplex bestSimplex = new ComplexSimplex();
         float bestSupportDifference = 0f;
         Vector3 bestP = Vector3.zero;
+        Vector3 bestDir = Vector3.zero;
         GJKHit ret = new GJKHit();
         SimplexSolve closests = new SimplexSolve();
         Vector3 separation = Vector3.zero;
+        Vector3 lastNonZeroDir = Vector3.zero;
+        SimplexSolve p_dir = new SimplexSolve();
         // if one triangle is unnecessarily huge, epsilon might not be large enough to check directional values against each other if its almost exactly touching
-        for (int i = 0; i < 30; ++i)
-        { //30 iterations of loop to converge
+        for (int i = 0; i < 40; ++i)
+        { //40 iterations of loop to converge
 
             // solving direction from cross products gives much more accuracy than resolving from p
             // resolving from p can result in infinite loops when epsilon is too small to check directional differences
-            SimplexSolve p_dir = new SimplexSolve();
             switch (simplex.count)
             {
                 case 1:
@@ -140,13 +142,51 @@ public class GJKClosest : MonoBehaviour
                     return ret;
             }
 
+            if (p_dir.dir.sqrMagnitude > EPSILON)
+            {
+                lastNonZeroDir = p_dir.dir;
+            }
             // checking if distance squared from p to 0 is less than epsilon rather than comparing it to 0
             // because I'm not entirely sure how it would work together with the tetrahedron cross product
             // check and the support point directional check below
             if (p_dir.p.magnitude < EPSILON)
             {
+                closests = GetLocalPoints(simplex, p_dir.p); //speed
+                separation = closests.dir - closests.p;
                 ret.hit = true;
-                ret.distance = 0f;
+                ret.closestA = closests.p; //THESE ARE 0 0 0, this is the issue here
+                ret.closestB = closests.dir;  //THESE ARE 0 0 0, this is the issue here
+                //if (separation.sqrMagnitude < EPSILON)
+                //{
+                //    ret.normal = Vector3.zero;
+                //}
+                //else
+                //{
+                    //ret.normal = separation.normalized; //p_dir.dir.normalized;
+                //} 
+                //ret.distance = Vector3.Dot(separation, wishMove.normalized);
+                ret.distance = separation.magnitude;
+                ret.point = closests.dir;
+
+                //llm suggested normals
+                // The search direction p_dir.dir points from the CSO simplex toward the origin.
+                // This is the direction from mesh to player (the correct outward normal).
+                if (p_dir.p.sqrMagnitude > EPSILON)
+                {
+                    ret.normal = p_dir.p.normalized;
+                }
+                else if (p_dir.dir.sqrMagnitude > EPSILON)
+                {
+                    ret.normal = -p_dir.dir.normalized;
+                }
+                else
+                {
+                    ret.normal = lastNonZeroDir.normalized;
+                }
+                Debug.Log(ret.normal);
+                Debug.Log(ret.distance);
+                Debug.Log(ret.closestA);
+                Debug.Log(ret.closestB);
                 return ret;
             }
 
@@ -157,6 +197,8 @@ public class GJKClosest : MonoBehaviour
             // if p is more than or equivalently extremal in the direction of the origin, we can't find a better support point
             // scaled_epsilon := support.magnitude * EPSILON;
             // print("% >= %\n", dir_strength(p, direction), dir_strength(support, direction));
+            //this causes weird behaviour 
+            //this is the part that returns 0 distance even though it doesn't return 1 distance, it might return incorrect normals, so search is backwards even though I sweep the convex hull to filter only for collisions in the correct direction
             float p_dirStrength = GetDirStrength(p_dir.p, p_dir.dir);
             float support_dirStrength = GetDirStrength(support, p_dir.dir) - EPSILON;
             /*if (Vector3.Dot(support, p_dir.dir) < 0)*/ if (p_dirStrength >= support_dirStrength - EPSILON)
@@ -166,15 +208,19 @@ public class GJKClosest : MonoBehaviour
                 ret.hit = false;
                 ret.closestA = closests.p;
                 ret.closestB = closests.dir;
-                //if (separation.sqrMagnitude < EPSILON)
-                //{
-                //    ret.normal = Vector3.zero;
-                //}
-                //else
-                //{
-                    ret.normal = separation.normalized; // p_dir.dir.normalized
-                //} 
-                //ret.distance = Vector3.Dot(separation, wishMove.normalized);
+                if (p_dir.p.sqrMagnitude > EPSILON)
+                {
+                    ret.normal = p_dir.p.normalized;
+                }
+                else if (p_dir.dir.sqrMagnitude > EPSILON)
+                {
+                    ret.normal = -p_dir.dir.normalized;
+                }
+                else
+                {
+                    ret.normal = lastNonZeroDir.normalized;
+                }
+                ret.normal *= -1f; //this is needed
                 ret.distance = separation.magnitude;
                 ret.point = closests.dir;
                 return ret;
@@ -187,6 +233,7 @@ public class GJKClosest : MonoBehaviour
                 bestSupportDifference = support_dirStrength - p_dirStrength;
                 bestSimplex = simplex.Copy();
                 bestP = p_dir.p;
+                bestDir = p_dir.dir;
             }
 
             simplex.d = simplex.c; simplex.d1 = simplex.c1; simplex.d2 = simplex.c2;
@@ -204,118 +251,102 @@ public class GJKClosest : MonoBehaviour
         ret.hit = false;
         ret.closestA = closests.p;
         ret.closestB = closests.dir;
-        //if (separation.sqrMagnitude < EPSILON)
-        //{
-            //ret.normal = Vector3.zero;
-        //}
-        //else
-        //{
-            ret.normal = separation.normalized; //p_dir.dir.normalized
-        //} 
-        //ret.distance = Vector3.Dot(separation, wishMove.normalized);
+        if (p_dir.p.sqrMagnitude > EPSILON)
+        {
+            ret.normal = p_dir.p.normalized;
+        }
+        else if (p_dir.dir.sqrMagnitude > EPSILON)
+        {
+            ret.normal = -p_dir.dir.normalized;
+        }
+        else
+        {
+            ret.normal = lastNonZeroDir.normalized;
+        }
         ret.distance = separation.magnitude;
         ret.point = closests.dir;
         return ret;
     }
 
-    public GJKHit GJKShapeCast(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove)
+    public GJKHit GJKShapeCast(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove) //TODO: for real
     {
         Vector3 dir = wishMove.normalized;
+        if (dir.magnitude <= 0f)
+        {
+            dir = Vector3.one;
+        } 
         float remaining = wishMove.magnitude;
+        float wishdist = wishMove.magnitude;
+        float moved = 0f;
 
         Vector3 x = playerPos;
 
         GJKHit ret = new GJKHit();
+        GJKHit prev = new GJKHit();
 
-        for (int step = 0; step < 20; step++)
+        for (int step = 0; step < 30; step++)
         {
-            // Run your existing closest-distance GJK
-            GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, wishMove);
-
+            GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, dir); //just direction for wishmove, doesn't take distance
             // overlap
             if (gjk.hit || gjk.distance < EPSILON)
             {
                 ret.hit = true;
                 ret.distance = (x - playerPos).magnitude;
-                ret.normal = gjk.normal;
+                if (ret.distance > EPSILON)
+                {
+                    ret.distance -= EPSILON;
+                }
+                ret.normal = prev.normal.magnitude > 0 ? prev.normal : gjk.normal;
+                //ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, dir).normal;
                 ret.point = gjk.point;
                 return ret;
             }
+            
 
-            float denom = Vector3.Dot(gjk.normal, dir);
+            float denom = -Vector3.Dot(gjk.normal, dir);
 
-            // moving away
-            if (denom <= EPSILON)
-            {
-                ret.hit = false;
-                return ret;
-            }
+            // moving away, this shouldn't happen as I check for collisions in sweep ahead of time, but this is what is causing the issue
+            //if (denom >= 0) //for some reason this case runs on the last frame I am outside of geometry, this gets me stuck somehow
+            //{
+                //ret.hit = false;
+                //Debug.Log('2');
+                //return ret;
+            //}
 
+            //float stepDist = gjk.distance;
             float stepDist = gjk.distance / denom;
 
             if (stepDist > remaining)
             {
                 ret.hit = false;
+                //this gets us stuck in slopes and on ground sometimes, idk how
                 return ret;
             }
-
+            stepDist = Math.Max(0f, stepDist); //always have small margin, so we don't actually hit, and get bad separation
             // advance
             x += dir * stepDist;
             remaining -= stepDist;
+            moved += stepDist;
 
             if (remaining <= EPSILON)
             {
                 ret.hit = false;
                 return ret;
             }
+
+            prev = gjk;
         }
 
-        ret.hit = false;
+        ret.hit = true;
+        ret.distance = (x - playerPos).magnitude; //this case is 0 for some reason, idk how we even get into this branch (exit the loop after 30 iterations)
+        if (ret.distance > EPSILON)
+        {
+            ret.distance -= EPSILON;
+        }
+        ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove).normal;
+        //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
         return ret;
     }
-
-    /*List<List<Vector3>> ResolveSimplex(ComplexSimplex complex) { //gets points on original shapes that contribute to found point on difference
-        List<Vector3> simplex1 = new List<Vector3>();
-        simplex1.Add(complex.a1);
-        List<Vector3> simplex2 = new List<Vector3>();
-        simplex2.Add(complex.a2);
-        // not sure if first is necessary but it makes sense to me that vertex c and a could overlap
-        Vector3 first1 = simplex1[0];
-        Vector3 first2 = simplex2[0];
-        Vector3 last1 = simplex1[0];
-        Vector3 last2 = simplex2[0];
-        for (int i = 1; i < complex.count; ++i)
-        {
-            Vector3 current1 = first1;
-            Vector3 current2 = first2;
-
-            switch (i)
-            {
-                case 1:
-                    current1 = complex.b1;
-                    current2 = complex.b2;
-                    break;
-                case 2:
-                    current1 = complex.c1;
-                    current2 = complex.c2;
-                    break;
-                case 3:
-                    current1 = complex.d1;
-                    current2 = complex.d2;
-                    break;
-            }
-            if (current1 != first1 && current1 != last1) //this is weird, last is never updated, checking contains might be more secure
-            {
-                simplex1.Add(current1);
-            }
-            if (current2 != first2 && current2 != last2)
-            {
-                simplex2.Add(current2);
-            }
-        }
-
-        return new List<List<Vector3>> {simplex1, simplex2};
-    }*/
 
     //simplex cases
     SimplexSolve PointSimplex(ref ComplexSimplex simplex)

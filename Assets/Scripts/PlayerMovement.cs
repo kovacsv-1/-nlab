@@ -44,6 +44,7 @@ public class PlayerMovement : MonoBehaviour
 
     private Vector3 velocity = new Vector3(0f, 0f, 0f);
     private GameObject ground = null;
+    private GameObject dummyObject = null; //so SweptTrace doesn't need an insane amount of objects to be called 
     private Vector3 groundNormal = new Vector3(0f, 1f, 0f);
     private bool isCrouching = false;
     private bool jumping = false;
@@ -89,6 +90,7 @@ public class PlayerMovement : MonoBehaviour
         boundingBox = GetComponent<BoxCollider>();
         tracer = GetComponent<SweptTraces>();
         gjkClosest = GetComponent<GJKClosest>();
+        Application.targetFrameRate = 132;
         //Physics.defaultContactOffset = 0;
         // GroundCheck(this.gameObject.transform.position);
     }
@@ -102,6 +104,7 @@ public class PlayerMovement : MonoBehaviour
         if (UnsweptTrace(newPos))
         {
             //TODO: attempt to find free space
+            newPos = GetUnstuck(newPos);
         }
         else //if stuck
         {
@@ -136,12 +139,15 @@ public class PlayerMovement : MonoBehaviour
             Accelerate();
 
             //  9. Movement and collisions,
-            //TODO
             newPos = Move(4, Time.fixedDeltaTime, newPos);
+            if (ground != null)
+            {
+                newPos = GroundCheck(newPos, maxStepHeight + surfaceExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
+            }
             //handle step up on collision, step down at the end of frame
 
             // 10. Check for ground to stand on,
-            newPos = GroundCheck(newPos);
+            newPos = GroundCheck(newPos, groundingHeight);
 
             // 11. Apply other half of gravity,
             AddHalfGravity();
@@ -165,8 +171,6 @@ public class PlayerMovement : MonoBehaviour
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
         // 16. Shoot / detonate projectiles.
-
-
 
         jumping = false; //reset jump input, will be set to true again if the player presses the jump button before the next FixedUpdate
     }
@@ -222,8 +226,15 @@ public class PlayerMovement : MonoBehaviour
         //  1. Cap speed,
         CapSpeed(walkSpeed * classSpeedMod * bhopCap);
 
+        if (Vector3.Dot(groundNormal, Vector3.up) < 1f)
+        {
+            velocity = velocity + (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal;
+            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up; //so we don't jump towards the slope every time we jump
+        }
+
         //  2. Unground the player,
         ground = null;
+        groundNormal = Vector3.up;
 
         //  3. Apply jump velocity,
         velocity = new Vector3(velocity.x, velocity.y + jumpVelocity, velocity.z);
@@ -321,7 +332,7 @@ public class PlayerMovement : MonoBehaviour
         
     }
 
-    Vector3 GroundCheck(Vector3 pos)
+    Vector3 GroundCheck(Vector3 pos, float checkDist)
     {
         Vector3 ret = pos;
         float groundYVel = 0f;
@@ -340,7 +351,7 @@ public class PlayerMovement : MonoBehaviour
 
         groundNormal = Vector3.up;
         
-        Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
+        /*Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
         Vector3.up / 2; // for the unity docs thing, so we cast from far enough up to have no overlap
         //"For colliders that overlap the sphere at the start of the sweep,
         //RaycastHit.normal is set opposite to the direction of the sweep,
@@ -355,29 +366,59 @@ public class PlayerMovement : MonoBehaviour
             new Vector3(boundingBoxWidth, 1f, boundingBoxWidth) * 0.5f,
             Vector3.down,
             Quaternion.identity,
-            groundingHeight,
+            checkDist,
             colliderMask,
             QueryTriggerInteraction.Ignore
-        );
+        );*/
 
         GameObject found = null;
-        float distance = 0f;
-        float minDistance = 2f;
+        //float distance = 0f;
+        //float minDistance = checkDist;
+        RaycastHit hit = new RaycastHit();
+        float completed = SweptTrace(pos, pos - Vector3.up * checkDist, out hit, out found);
 
-        foreach (RaycastHit hit in hits) {
+        if (completed >= 1f)
+        {
+            ground = null;
+            groundNormal = Vector3.up;
+            return ret;
+        }
+        //Debug.Log(completed); //ALWAYS 0, HELP, IDK WHY, IT WORKS IN MOVE(...)
+        //Debug.Log(found);
+
+
+        /*foreach (RaycastHit hit in hits)
+        {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
-            if (dot >= cosMaxWalkableAngle && hit.distance <= minDistance) {
+            MeshCollider other = cr.ResolveCollider(hit.collider);
+            if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * checkDist)
+                /*&& !tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * 0f)/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            {   //should really gjkshapecast for exact results, just the bpxcast often allows you to jump on walls, as it has an extention, and when close you get a 0 distance upwards facing hit
+                groundNormal = Vector3.up;
+                found = null;
                 //bestDot = dot; //if looking for flattest instead of highest
-                groundNormal = hit.normal;
-                found = hit.collider.gameObject;
                 distance = hit.distance;
                 minDistance = hit.distance;
+                if (dot >= cosMaxWalkableAngle)
+                {
+                    groundNormal = hit.normal;
+                    found = hit.collider.gameObject;
+                } 
             }
-        }
+        }*/
         
+        if (Vector3.Dot(hit.normal, Vector3.up) >= cosMaxWalkableAngle)
+        {
+            groundNormal = hit.normal;
+        }
+        else
+        {
+            found = null;
+        }
+
         if (ground != null && found != null)
         {
-            ret = pos - Vector3.up * distance + Vector3.up * surfaceExtention;
+            ret = pos - Vector3.up * hit.distance + Vector3.up * surfaceExtention;
         }
 
         ground = found;
@@ -404,13 +445,33 @@ public class PlayerMovement : MonoBehaviour
         return false;
     }
 
+    Vector3 GetUnstuck(Vector3 pos)
+    {
+        for (int i = -1; i < 2; ++i)
+        {
+            for (int e = -1; e < 2; ++e)
+            {
+                for (int f = -1; f < 2; ++f)
+                {
+                    Vector3 testPos = new Vector3(pos.x + e, pos.y - i, pos.z + f); //check straight up first
+                    if (!UnsweptTrace(testPos))
+                    {
+                        return testPos;
+                    }
+                }
+            }
+        }
+        return pos;
+    }
+
     //this is weird, has 2 version for leaves and brushes respectively: a <= b and a - b <= 0, so there are some rounding disagreements, causing bugs, which, for now, I will not replicate
-    float SweptTrace(Vector3 startPos, Vector3 wishPos, out RaycastHit hit)
+    float SweptTrace(Vector3 startPos, Vector3 wishPos, out RaycastHit hit, out GameObject collidedObject)
     {
         Vector3 wishmove = wishPos - startPos;
         float wishdist = wishmove.magnitude;
-        Vector3 wishdir = new Vector3(wishmove.x, wishmove.y, wishmove.z).normalized;
+        Vector3 wishdir = wishmove.normalized;
         hit = new RaycastHit();
+        collidedObject = null;
 
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
         RaycastHit[] hits = Physics.BoxCastAll(
@@ -425,6 +486,7 @@ public class PlayerMovement : MonoBehaviour
 
         if (hits.Length == 0)
         {
+            hit.normal = Vector3.zero;
             return 1f;
         }
 
@@ -435,8 +497,8 @@ public class PlayerMovement : MonoBehaviour
         for (int i = 0; i < hits.Length; ++i)
         {
             MeshCollider other = cr.ResolveCollider(hits[i].collider);
-            if (tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
-            {
+            if (tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            { //this should work, but just never would run with the check
                 ColDist info = new ColDist();
                 info.collider = other;
                 info.dist = hits[i].distance;
@@ -446,6 +508,7 @@ public class PlayerMovement : MonoBehaviour
 
         if (collidedWith.Count == 0)
         {
+            hit.normal = Vector3.zero;
             return 1f;
         }
 
@@ -456,6 +519,7 @@ public class PlayerMovement : MonoBehaviour
         //and return the min distance hit's values with
         float bestDistance = float.PositiveInfinity;
         GJKHit bestHit = new GJKHit();
+        GameObject bestObject = null;
         foreach (var col in collidedWith)
         {
             GJKHit gjk = gjkClosest.GJKShapeCast(
@@ -469,22 +533,25 @@ public class PlayerMovement : MonoBehaviour
             {
                 bestDistance = gjk.distance;
                 bestHit = gjk;
+                bestObject = col.collider.gameObject;
             }
         }
         if (bestHit.hit)
         {
             hit.distance = bestHit.distance;
             hit.point = bestHit.point;
-            hit.normal = bestHit.normal;
+            hit.normal = -bestHit.normal;
+            collidedObject = bestObject;
             return bestDistance / wishdist;
         }
         else
         {
+            hit.normal = Vector3.zero;
             return 1f;
         }
 
         //return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
-        return hit.distance / wishdist;
+        //return hit.distance / wishdist;
     }
 
     Vector3 Move(int depth, float timeLeft, Vector3 startPos)
@@ -496,10 +563,15 @@ public class PlayerMovement : MonoBehaviour
         }
         Vector3 wishpos = startPos + velocity * timeLeft;
         RaycastHit hit;
-        float completed = SweptTrace(startPos, wishpos, out hit);
+        float completed = SweptTrace(startPos, wishpos, out hit, out dummyObject);
         if (completed >= 1.0f)
         {
-            return wishpos;
+            return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) + surfaceExtention * hit.normal, (wishpos - startPos).normalized);
+        }
+        Vector3 remove = Vector3.Project(velocity, hit.normal);
+        if (Vector3.Dot(remove, hit.normal) < 0f)
+        {
+            remove *= -1f;
         }
         if (hit.distance == 0f) //overlap at start
         {
@@ -507,12 +579,16 @@ public class PlayerMovement : MonoBehaviour
             //if cannot escape, just end with startPos
             //for now...
             //return Move(depth - 1, timeLeft - completed * timeLeft, startPos + (wishpos - startPos) * completed + surfaceExtention * hit.normal);
+            //velocity = velocity + Math.Abs(Vector3.Dot(velocity, hit.normal)) * hit.normal;
+            velocity = velocity + remove;
         }
         else
         {
-            Debug.Log(hit.normal);
-            velocity = velocity - Vector3.Dot(velocity, hit.normal) * hit.normal;
+            //velocity = velocity + Math.Abs(Vector3.Dot(velocity, hit.normal)) * hit.normal;
+            velocity = velocity + remove;
         }
+        //if collided wall, move playerup 18 units, forwards 0.04 units and stuckcheck+groundcheck to handle stairs
+        //if it was a stairsetp, recurse without decreasing depth, so we don't just stop the movement after 4 stps when moving fast
 
         return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized));
     }
@@ -532,5 +608,6 @@ public class PlayerMovement : MonoBehaviour
     {
         //problem: this is the opposite direction when too close, because boxcastall sucks
         return Vector3.Dot(along, a) > Vector3.Dot(along, b) ? a : b;
+        //return b;
     }
 }
