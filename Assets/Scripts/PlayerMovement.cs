@@ -332,6 +332,59 @@ public class PlayerMovement : MonoBehaviour
         
     }
 
+    /*Vector3 GroundCheck(Vector3 pos, float checkDist)
+    {
+        Vector3 ret = pos;
+        float groundYVel = 0f;
+        if (ground != null) {
+            MovingPlatform platform = ground.GetComponent<MovingPlatform>();
+            if (platform != null)
+            {
+                groundYVel = Mathf.Max(0, platform.GetCurrentVelocity().y); //to jump off fast moving platforms...
+            }
+        }
+        if (velocity.y > leaveVelocity + groundYVel)
+        {
+            ground = null;
+            return ret;
+        }
+
+        groundNormal = Vector3.up;
+        
+
+        GameObject found = null;
+        //float distance = 0f;
+        //float minDistance = checkDist;
+        RaycastHit hit = new RaycastHit();
+        float completed = SweptTrace(pos, pos - Vector3.up * checkDist, out hit, out found);
+
+        if (completed >= 1f)
+        {
+            ground = null;
+            groundNormal = Vector3.up;
+            return ret;
+        }
+        //Debug.Log(completed); //ALWAYS 0, HELP, IDK WHY, IT WORKS IN MOVE(...)
+        //Debug.Log(found);
+        
+        if (Vector3.Dot(hit.normal, Vector3.up) >= cosMaxWalkableAngle)
+        {
+            groundNormal = hit.normal;
+        }
+        else
+        {
+            found = null;
+        }
+
+        if (ground != null && found != null)
+        {
+            ret = pos - Vector3.up * hit.distance + Vector3.up * surfaceExtention;
+        }
+
+        ground = found;
+        return ret;
+    }*/
+
     Vector3 GroundCheck(Vector3 pos, float checkDist)
     {
         Vector3 ret = pos;
@@ -351,7 +404,11 @@ public class PlayerMovement : MonoBehaviour
 
         groundNormal = Vector3.up;
         
-        /*Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
+        GameObject found = null;
+        float distance = 0f;
+        float minDistance = checkDist;
+        
+        Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
         Vector3.up / 2; // for the unity docs thing, so we cast from far enough up to have no overlap
         //"For colliders that overlap the sphere at the start of the sweep,
         //RaycastHit.normal is set opposite to the direction of the sweep,
@@ -369,30 +426,15 @@ public class PlayerMovement : MonoBehaviour
             checkDist,
             colliderMask,
             QueryTriggerInteraction.Ignore
-        );*/
+        );
 
-        GameObject found = null;
-        //float distance = 0f;
-        //float minDistance = checkDist;
-        RaycastHit hit = new RaycastHit();
-        float completed = SweptTrace(pos, pos - Vector3.up * checkDist, out hit, out found);
-
-        if (completed >= 1f)
-        {
-            ground = null;
-            groundNormal = Vector3.up;
-            return ret;
-        }
-        //Debug.Log(completed); //ALWAYS 0, HELP, IDK WHY, IT WORKS IN MOVE(...)
-        //Debug.Log(found);
-
-
-        /*foreach (RaycastHit hit in hits)
+        
+        foreach (RaycastHit hit in hits)
         {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
             MeshCollider other = cr.ResolveCollider(hit.collider);
             if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * checkDist)
-                /*&& !tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * 0f)/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+                /*&& !tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {   //should really gjkshapecast for exact results, just the bpxcast often allows you to jump on walls, as it has an extention, and when close you get a 0 distance upwards facing hit
                 groundNormal = Vector3.up;
                 found = null;
@@ -405,20 +447,11 @@ public class PlayerMovement : MonoBehaviour
                     found = hit.collider.gameObject;
                 } 
             }
-        }*/
-        
-        if (Vector3.Dot(hit.normal, Vector3.up) >= cosMaxWalkableAngle)
-        {
-            groundNormal = hit.normal;
-        }
-        else
-        {
-            found = null;
         }
 
         if (ground != null && found != null)
         {
-            ret = pos - Vector3.up * hit.distance + Vector3.up * surfaceExtention;
+            ret = pos - Vector3.up * minDistance + Vector3.up * surfaceExtention;
         }
 
         ground = found;

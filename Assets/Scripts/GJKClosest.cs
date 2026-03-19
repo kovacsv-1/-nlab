@@ -220,7 +220,7 @@ public class GJKClosest : MonoBehaviour
                 {
                     ret.normal = lastNonZeroDir.normalized;
                 }
-                ret.normal *= -1f; //this is needed
+                //ret.normal *= -1f; //this is needed
                 ret.distance = separation.magnitude;
                 ret.point = closests.dir;
                 return ret;
