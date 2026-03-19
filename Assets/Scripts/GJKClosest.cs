@@ -127,14 +127,7 @@ public class GJKClosest : MonoBehaviour
                     p_dir = TriangleSimplex(ref simplex);
                     break;
                 case 4:
-                    // current_simplex := simplex;
                     p_dir = TetrahedronSimplex(ref simplex);
-                    // if p == .{} {
-                    //     #if GJK_DEBUG {
-                    //         step_debug(simplex, v1, v2, p, .{0, 1000, 0}, true);
-                    //     }
-                    //     return true, current_simplex, .{}, .{};
-                    // }
                     break;
                 default:
                     ret.hit = true;
@@ -183,10 +176,10 @@ public class GJKClosest : MonoBehaviour
                 {
                     ret.normal = lastNonZeroDir.normalized;
                 }
-                Debug.Log(ret.normal);
-                Debug.Log(ret.distance);
-                Debug.Log(ret.closestA);
-                Debug.Log(ret.closestB);
+                //Debug.Log(ret.normal);
+                //Debug.Log(ret.distance);
+                //Debug.Log(ret.closestA);
+                //Debug.Log(ret.closestB);
                 return ret;
             }
 
