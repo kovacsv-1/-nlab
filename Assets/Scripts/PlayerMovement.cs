@@ -8,6 +8,7 @@ public class PlayerMovement : MonoBehaviour
     //values taken from tf2:
     //tickrate: 66.6...; a tick is 0.015 seconds
     private const float surfaceExtention = 0.03125f;
+    private const float groundExtention = 0.705f;
     private const float groundingHeight = 2f;
     private const float maxVelocity = 3500f;
     private const float leaveVelocity = 250f;
@@ -142,7 +143,7 @@ public class PlayerMovement : MonoBehaviour
             newPos = Move(4, Time.fixedDeltaTime, newPos);
             if (ground != null)
             {
-                newPos = GroundCheck(newPos, maxStepHeight + surfaceExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
+                newPos = GroundCheck(newPos, maxStepHeight + groundExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
             }
             //handle step up on collision, step down at the end of frame
 

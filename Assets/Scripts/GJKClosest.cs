@@ -183,10 +183,10 @@ public class GJKClosest : MonoBehaviour
                 {
                     ret.normal = lastNonZeroDir.normalized;
                 }
-                Debug.Log(ret.normal);
-                Debug.Log(ret.distance);
-                Debug.Log(ret.closestA);
-                Debug.Log(ret.closestB);
+                Debug.Log(ret.normal); //swaps between 2 incorrect ones that are opposites
+                Debug.Log(ret.distance); //0
+                Debug.Log(ret.closestA); //000
+                Debug.Log(ret.closestB); //000
                 return ret;
             }
 
