@@ -116,6 +116,7 @@ public class PlayerMovement : MonoBehaviour
             }
 
             //  3. Handle ducking,
+            newPos = HandleCrouch(newPos);
 
             //  4. Apply half of gravity,
             AddHalfGravity();
@@ -169,6 +170,8 @@ public class PlayerMovement : MonoBehaviour
 
         // 15. Update bounding box,
         transform.position = newPos;
+        float camY = newPos.y - playerBounds().y / 2f + (isCrouching ? duckingViewHeight : standingViewHeight);
+        cameraTf.position = new Vector3(newPos.x, camY, newPos.z);
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
         // 16. Shoot / detonate projectiles.
@@ -434,8 +437,8 @@ public class PlayerMovement : MonoBehaviour
         {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
             MeshCollider other = cr.ResolveCollider(hit.collider);
-            if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * checkDist)
-                /*&& !tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * checkDist)
+                /*&& !tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {   //should really gjkshapecast for exact results, just the bpxcast often allows you to jump on walls, as it has an extention, and when close you get a 0 distance upwards facing hit
                 groundNormal = Vector3.up;
                 found = null;
@@ -465,13 +468,13 @@ public class PlayerMovement : MonoBehaviour
     {
         Collider[] colliders = Physics.OverlapBox(
             pos,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //surfaceextention?, crouch?
+            playerBounds() * 0.5f, //surfaceextention?, crouch?
             Quaternion.identity,
             colliderMask
         );
         for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), playerBounds() * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
                 return true;
             }
@@ -510,7 +513,7 @@ public class PlayerMovement : MonoBehaviour
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
         RaycastHit[] hits = Physics.BoxCastAll(
             startPos,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
+            playerBounds() * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
             wishdir,
             Quaternion.identity,
             wishdist,
@@ -531,7 +534,7 @@ public class PlayerMovement : MonoBehaviour
         for (int i = 0; i < hits.Length; ++i)
         {
             MeshCollider other = cr.ResolveCollider(hits[i].collider);
-            if (tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             { //this should work, but just never would run with the check
                 ColDist info = new ColDist();
                 info.collider = other;
@@ -558,7 +561,7 @@ public class PlayerMovement : MonoBehaviour
         {
             GJKHit gjk = gjkClosest.GJKShapeCast(
                 col.collider,
-                new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f,
+                playerBounds() * 0.5f,
                 startPos,
                 wishmove
             );
@@ -632,6 +635,56 @@ public class PlayerMovement : MonoBehaviour
     // and the zero vector gets returned in RaycastHit.point.
     // You might want to check whether this is the case in your particular query and perform additional queries to refine the result.
     // this can be useful for starting in a wall and leaving it and being fully stuck without being able to leave so we just return start
+
+    Vector3 playerBounds()
+    {
+        if (isCrouching)
+        {
+            return new Vector3(boundingBoxWidth, duckingBoundingBoxHeight, boundingBoxWidth);
+        }
+        return new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth);
+    }
+
+    Vector3 Crouch(Vector3 pos)
+    {
+        //TODO: interpolate this when on ground
+        Vector3 ret = pos;
+        if (isCrouching)
+        {
+            return ret;
+        }
+        isCrouching = true;
+        transform.localScale = playerBounds();
+        ret += (ground != null) ? Vector3.down * 10f : Vector3.up * 10f;
+        return ret;
+    }
+
+    Vector3 Stand(Vector3 pos)
+    {
+        Vector3 ret = pos;
+        if (!isCrouching)
+        {
+            return ret;
+        }
+        isCrouching = false;
+        ret += (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
+        if (UnsweptTrace(ret)) //would be stuck in geomety, undo it
+        {
+            isCrouching = true;
+            ret -= (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
+        }
+        transform.localScale = playerBounds();
+        return ret;
+    }
+
+    Vector3 HandleCrouch(Vector3 pos)
+    {
+        if (Input.GetButton("Crouch"))
+        {
+            return Crouch(pos);
+        }
+        return Stand(pos);
+    }
     
     float BoolToFloat(bool b)
     {
