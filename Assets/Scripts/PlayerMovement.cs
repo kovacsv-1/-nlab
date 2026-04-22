@@ -62,10 +62,11 @@ public class PlayerMovement : MonoBehaviour
     List<Vector3> poss = new List<Vector3>();
     List<Vector3> dirst = new List<Vector3>();
 
-    public int crouchAnimLength = 20; // 20/66.66...s to crouch/uncrouch 
+    public int crouchAnimLength = 6; // 6/66.6...s to crouch/uncrouch 
     private int currentCrouchFrame = 0; // 0 -> fully standing; crouchAnimLength -> fully crouched
     private int maxAirCrouches = 2;
     private int usedAirCrouches = 0;
+    private int jumpLockOut = 3;
 
     class ColliderResolver  //to not call a lot of getcomponents
     {
@@ -96,7 +97,7 @@ public class PlayerMovement : MonoBehaviour
         boundingBox = GetComponent<BoxCollider>();
         tracer = GetComponent<SweptTraces>();
         gjkClosest = GetComponent<GJKClosest>();
-        Application.targetFrameRate = 132;
+        //Application.targetFrameRate = 132;
         //Physics.defaultContactOffset = 0;
         // GroundCheck(this.gameObject.transform.position);
     }
@@ -104,6 +105,10 @@ public class PlayerMovement : MonoBehaviour
     // FixedUpdate is called once per tick
     void FixedUpdate()
     {
+        if (jumpLockOut < 3)
+        {
+            jumpLockOut++;
+        }
         Vector3 newPos = this.gameObject.transform.position;
 
         //  1. If stuck, attempt to find free space and skip to step 14,
@@ -121,13 +126,13 @@ public class PlayerMovement : MonoBehaviour
             }
 
             //  3. Handle ducking,
-            HandleCrouch();
+            newPos = HandleCrouch(newPos);
 
             //  4. Apply half of gravity,
             AddHalfGravity();
 
             //  5. Handle jumping,
-            if (ground != null && jumping && !isCrouching)
+            if (ground != null && jumping && !isCrouching && jumpLockOut >= 3)
             {
                 Jump();
             }
@@ -175,6 +180,8 @@ public class PlayerMovement : MonoBehaviour
 
         // 15. Update bounding box,
         transform.position = newPos;
+        float camY = newPos.y - playerBounds().y / 2f + (standingViewHeight - (standingViewHeight - duckingViewHeight) * currentCrouchFrame / crouchAnimLength);
+        cameraTf.position = new Vector3(newPos.x, camY, newPos.z);
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
         // 16. Shoot / detonate projectiles.
@@ -230,13 +237,16 @@ public class PlayerMovement : MonoBehaviour
 
     void Jump()
     {
+        usedAirCrouches = 0;
+        jumpLockOut = 0;
         //  1. Cap speed,
         CapSpeed(walkSpeed * classSpeedMod * bhopCap);
 
         if (Vector3.Dot(groundNormal, Vector3.up) < 1f)
-        {
+        {   //so we don't jump towards the slope every time we jump
             velocity = velocity + (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal;
-            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up; //so we don't jump towards the slope every time we jump
+            velocity = new Vector3(velocity.x, 0f, velocity.z);
+            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up;
         }
 
         //  2. Unground the player,
@@ -244,9 +254,14 @@ public class PlayerMovement : MonoBehaviour
         groundNormal = Vector3.up;
 
         //  3. Apply jump velocity,
-        velocity = new Vector3(velocity.x, velocity.y + jumpVelocity, velocity.z);
-        //crouchjump version:
-        //velocity = new Vector3(velocity.x, jumpVelocity, velocity.z);
+        if (currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength)
+        {
+            velocity = new Vector3(velocity.x, jumpVelocity, velocity.z);
+        }
+        else 
+        {
+            velocity = new Vector3(velocity.x, velocity.y + jumpVelocity, velocity.z);
+        }
 
         //  4. Apply half of gravity
         AddHalfGravity();
@@ -440,8 +455,8 @@ public class PlayerMovement : MonoBehaviour
         {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
             MeshCollider other = cr.ResolveCollider(hit.collider);
-            if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * checkDist)
-                /*&& !tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * checkDist)
+                /*&& !tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {   //should really gjkshapecast for exact results, just the bpxcast often allows you to jump on walls, as it has an extention, and when close you get a 0 distance upwards facing hit
                 groundNormal = Vector3.up;
                 found = null;
@@ -471,13 +486,13 @@ public class PlayerMovement : MonoBehaviour
     {
         Collider[] colliders = Physics.OverlapBox(
             pos,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //surfaceextention?, crouch?
+            playerBounds() * 0.5f, //surfaceextention?, crouch?
             Quaternion.identity,
             colliderMask
         );
         for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), playerBounds() * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
                 return true;
             }
@@ -516,7 +531,7 @@ public class PlayerMovement : MonoBehaviour
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
         RaycastHit[] hits = Physics.BoxCastAll(
             startPos,
-            new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
+            playerBounds() * 0.5f, //TODO: handle crouch; height multiplyer is weird, unity thing, temporary
             wishdir,
             Quaternion.identity,
             wishdist,
@@ -537,7 +552,7 @@ public class PlayerMovement : MonoBehaviour
         for (int i = 0; i < hits.Length; ++i)
         {
             MeshCollider other = cr.ResolveCollider(hits[i].collider);
-            if (tracer.GJKSweptIntersects(other, new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             { //this should work, but just never would run with the check
                 ColDist info = new ColDist();
                 info.collider = other;
@@ -564,7 +579,7 @@ public class PlayerMovement : MonoBehaviour
         {
             GJKHit gjk = gjkClosest.GJKShapeCast(
                 col.collider,
-                new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth) * 0.5f,
+                playerBounds() * 0.5f,
                 startPos,
                 wishmove
             );
@@ -628,7 +643,30 @@ public class PlayerMovement : MonoBehaviour
             velocity = velocity + remove;
         }
         //if collided wall, move playerup 18 units, forwards 0.04 units and stuckcheck+groundcheck to handle stairs
-        //if it was a stairsetp, recurse without decreasing depth, so we don't just stop the movement after 4 stps when moving fast
+        //if (hit.distance < 1f)
+        //{
+            if (ground != null)
+            {
+                Debug.Log(dummyObject);
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * (minStepWidth + surfaceExtention) * 7f;
+                if (!UnsweptTrace(testPos)) //do not clip in walls
+                {
+                    GameObject oldGround = ground;
+                    Vector3 oldNormal = groundNormal;
+                    Vector3 stepped = GroundCheck(testPos, maxStepHeight + groundExtention * 3f); //stepped would ground us as we only check when grounded, this is the position we keep going
+                    if (ground == null || oldGround == ground)
+                    {
+                        ground = oldGround;
+                        groundNormal = oldNormal;
+                    }
+                    else
+                    {   //if it was a stairsetp, recurse without decreasing velocity, so we don't just stop the movement after moving fast (decreasing depth, because otherwise stack overflow happens)
+                        velocity = velocity - remove;
+                        return Move(depth - 1, timeLeft - completed * timeLeft, stepped);
+                    }
+                }
+            }
+        //}
 
         return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized));
     }
@@ -638,7 +676,123 @@ public class PlayerMovement : MonoBehaviour
     // and the zero vector gets returned in RaycastHit.point.
     // You might want to check whether this is the case in your particular query and perform additional queries to refine the result.
     // this can be useful for starting in a wall and leaving it and being fully stuck without being able to leave so we just return start
+
+    Vector3 playerBounds()
+    {
+        if (isCrouching)
+        {
+            return new Vector3(boundingBoxWidth, duckingBoundingBoxHeight, boundingBoxWidth);
+        }
+        return new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth);
+    }
+
+    Vector3 HandleCrouch(Vector3 pos)
+    {
+        Vector3 ret = pos;
+        bool crouchButtonState = Input.GetButton("Crouch");
+        /*
+        if (Input.GetButton("Crouch"))
+        {
+            return Crouch(pos);
+        }
+        return Stand(pos);
+        */
+        //if (waterLevel == 3 || (!isGrounded && waterLevel > 0)) {
+            //crouchButtonState = false; //it seems to animate standing in tf2, probably calls -crouch
+        //}
+        if (crouchButtonState) {
+            if (!isCrouching) {
+                if (ground == null) {
+                    if (usedAirCrouches < maxAirCrouches) {
+                        ret = Crouch(pos);
+                    }
+                }
+                else if (currentCrouchFrame < crouchAnimLength && !isCrouching)
+                {
+                    ret = AnimateCrouch(pos);
+                }
+            }
+            else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength)
+            {
+                ret = AnimateStand(pos);
+            }
+        }
+        else
+        {
+            if (ground != null)
+            {
+                ret = AnimateStand(pos);
+            }
+            else if (isCrouching)
+            {
+                ret = Stand(pos);   
+            }
+        }
+        return ret;
+    }
+
+    Vector3 Crouch(Vector3 pos)
+    {
+        Vector3 ret = pos;
+        if (isCrouching || usedAirCrouches >= maxAirCrouches)
+        {
+            return ret;
+        }
+        ++usedAirCrouches;
+        currentCrouchFrame = crouchAnimLength;
+        isCrouching = true;
+        transform.localScale = playerBounds();
+        ret += (ground != null) ? Vector3.down * 10f : Vector3.up * 10f;
+        return ret;
+    }
     
+    Vector3 Stand(Vector3 pos)
+    {
+        Vector3 ret = pos;
+        if (!isCrouching)
+        {
+            return ret;
+        }
+        isCrouching = false;
+        ret += (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
+        if (UnsweptTrace(ret)) //would be stuck in geomety, undo it
+        {
+            isCrouching = true;
+            ret -= (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
+        }
+        transform.localScale = playerBounds();
+        currentCrouchFrame = 0;
+        return ret;
+    }
+
+    private Vector3 AnimateCrouch(Vector3 pos) {
+        if (currentCrouchFrame < crouchAnimLength) {
+            currentCrouchFrame++;
+        }
+        if (currentCrouchFrame == crouchAnimLength) {
+            return Crouch(pos);
+        }
+        return pos;
+    }
+
+    private Vector3 AnimateStand(Vector3 pos) {
+        bool wasCrouching = isCrouching;
+        isCrouching = false;
+        if (UnsweptTrace(pos + (wasCrouching ? ((ground != null) ? Vector3.up * 10f : Vector3.down * 10f) : new Vector3(0f, 0f, 0f))))
+        {
+            isCrouching = wasCrouching;
+            return pos;
+        }
+        isCrouching = wasCrouching;
+        if (currentCrouchFrame > 0) {
+            currentCrouchFrame--;
+        } 
+        if (currentCrouchFrame == 0) {
+            return Stand(pos);
+        }
+        return pos;
+    }
+
     float BoolToFloat(bool b)
     {
         return b ? 1f : 0f;
