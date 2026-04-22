@@ -1,0 +1,44 @@
+source/quake movement resources:
+
+
+https://www.youtube.com/watch?v=EGQxNPb_aUA
+https://www.youtube.com/watch?v=zyEr2_-GvOQ&t=618s
+https://www.youtube.com/@htwo1/videos
+
+https://www.youtube.com/watch?v=AUPBC5W1KHo
+https://www.youtube.com/@shounic
+
+https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/QW/client/pmove.c#L587-L590
+
+https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/shared/tf/tf_gamemovement.cpp
+
+https://steamcommunity.com/sharedfiles/filedetails/?id=184184420
+
+https://www.youtube.com/@MattsRamblings
+
+https://www.youtube.com/watch?v=gRqoXy-0d84&t=407s
+
+https://developer.valvesoftware.com/wiki/Team_Fortress_2/Mapper's_Reference
+
+collision detection:
+
+https://youtu.be/DGVZYdlw_uo
+
+https://github.com/kujukuju/kodaphysics
+
+https://www.youtube.com/watch?v=RAGY6rTZDTA
+
+https://github.com/kujukuju/KodaPhysics/blob/master/src/GjkDir.jai
+
+https://www.youtube.com/watch?v=Qupqu1xe7Io
+
+maybe https://www.youtube.com/watch?v=SDS5gLSiLg0
+
+ehh https://simple-robotics.github.io/publications/gjk-acceleration/static/paper/montaut2024gjk.pdf
+
+for raycast: https://github.com/dmitriwamback/GJK/tree/main/core/math
+
+should use:
+https://dl.acm.org/
+https://dblp.org/
+https://ieeexplore.ieee.org/Xplore/home.jsp

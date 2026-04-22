@@ -62,6 +62,11 @@ public class PlayerMovement : MonoBehaviour
     List<Vector3> poss = new List<Vector3>();
     List<Vector3> dirst = new List<Vector3>();
 
+    public int crouchAnimLength = 20; // 20/66.66...s to crouch/uncrouch 
+    private int currentCrouchFrame = 0; // 0 -> fully standing; crouchAnimLength -> fully crouched
+    private int maxAirCrouches = 2;
+    private int usedAirCrouches = 0;
+
     class ColliderResolver  //to not call a lot of getcomponents
     {
         Dictionary<Collider, MeshCollider> map = new Dictionary<Collider, MeshCollider>();
@@ -116,6 +121,7 @@ public class PlayerMovement : MonoBehaviour
             }
 
             //  3. Handle ducking,
+            HandleCrouch();
 
             //  4. Apply half of gravity,
             AddHalfGravity();
