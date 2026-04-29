@@ -22,6 +22,7 @@ public class PlayerMovement : MonoBehaviour
     private const float airSpeed = 30f;
     public float classSpeedMod = 0.8f; //soldier
     private const float friction = 4f; //friction for regular ground, idk what ice uses, or if there even are ice physics in the engine
+    private const float waterFriction = 1f;
     private const float stopSpeed = 100f; //the speed at which friction will stop you, if your velocity is less than this, it will be set to 0 instead of being reduced by friction
     private const float duckSpeedMod = 1f / 3f; //tf2 reduces your max walking speed to 1/3 of your normal speed when ducking
     private const float backSpeedMod = 0.9f; //tf2 reduces your max walking speed to 90% when walking backwards
@@ -53,6 +54,7 @@ public class PlayerMovement : MonoBehaviour
     private Transform cameraTf;
     public float groundAccel = 10f; //reach max speed in 0.1s
     public float airAccel = 10f;
+    public float waterAccel = 10f;
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
 
@@ -68,6 +70,14 @@ public class PlayerMovement : MonoBehaviour
     private int usedAirCrouches = 0;
     private int jumpLockOut = 3;
 
+    
+    public List<GameObject> waterBodies;
+    private float sv_waterdist = 12f;
+    public LayerMask waterMask;
+    private float camY = 0f;
+
+    public int waterLevel = 0;
+
     class ColliderResolver  //to not call a lot of getcomponents
     {
         Dictionary<Collider, MeshCollider> map = new Dictionary<Collider, MeshCollider>();
@@ -82,7 +92,8 @@ public class PlayerMovement : MonoBehaviour
         }
     }
 
-    ColliderResolver cr = new ColliderResolver();
+    ColliderResolver colliderResolver = new ColliderResolver();
+    ColliderResolver waterResolver = new ColliderResolver();
 
     struct ColDist
     {
@@ -110,6 +121,7 @@ public class PlayerMovement : MonoBehaviour
             jumpLockOut++;
         }
         Vector3 newPos = this.gameObject.transform.position;
+        EvaluateWater();
 
         //  1. If stuck, attempt to find free space and skip to step 14,
         if (UnsweptTrace(newPos))
@@ -132,7 +144,7 @@ public class PlayerMovement : MonoBehaviour
             AddHalfGravity();
 
             //  5. Handle jumping,
-            if (ground != null && jumping && !isCrouching && jumpLockOut >= 3)
+            if (ground != null && waterLevel < 2 && jumping && !isCrouching && jumpLockOut >= 3)
             {
                 Jump();
             }
@@ -141,7 +153,10 @@ public class PlayerMovement : MonoBehaviour
             CapSpeed(maxVelocity);
 
             //  7. If on ground, zero out vertical velocity and apply friction,
-            if (ground != null)
+            if (waterLevel > 1)
+            {
+                WaterFriction();
+            } else if (ground != null)
             {
                 velocity = velocity - Vector3.Dot(velocity, groundNormal) * groundNormal; //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
                 Friction();
@@ -152,7 +167,7 @@ public class PlayerMovement : MonoBehaviour
 
             //  9. Movement and collisions,
             newPos = Move(4, Time.fixedDeltaTime, newPos);
-            if (ground != null)
+            if (ground != null && waterLevel < 2)
             {
                 newPos = GroundCheck(newPos, maxStepHeight + groundExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
             }
@@ -165,7 +180,7 @@ public class PlayerMovement : MonoBehaviour
             AddHalfGravity();
 
             // 12. If on ground, zero out vertical velocity,
-            if (ground != null)
+            if (ground != null && waterLevel < 2)
             {
                 velocity = velocity - Vector3.Dot(velocity, groundNormal) * groundNormal; //TODO: this works on horizontal planes, but will need to be changed when we add slopes, walking down on them would be jittery
             }
@@ -180,7 +195,7 @@ public class PlayerMovement : MonoBehaviour
 
         // 15. Update bounding box,
         transform.position = newPos;
-        float camY = newPos.y - playerBounds().y / 2f + (standingViewHeight - (standingViewHeight - duckingViewHeight) * currentCrouchFrame / crouchAnimLength);
+        camY = newPos.y - playerBounds().y / 2f + (standingViewHeight - (standingViewHeight - duckingViewHeight) * currentCrouchFrame / crouchAnimLength);
         cameraTf.position = new Vector3(newPos.x, camY, newPos.z);
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
@@ -203,14 +218,14 @@ public class PlayerMovement : MonoBehaviour
     {
         Vector3 groundVel = Vector3.zero;
 
-        if (ground != null)
+        /*if (ground != null)
         {
             MovingPlatform platform = ground.GetComponent<MovingPlatform>();
             if (platform != null)
             {
                 groundVel = platform.GetCurrentVelocity();
             }
-        }
+        }*/
 
         Vector3 relVelocity = velocity - groundVel;
 
@@ -233,6 +248,24 @@ public class PlayerMovement : MonoBehaviour
         Vector3 normalComponent = Vector3.Dot(relVelocity, groundNormal) * groundNormal;
 
         velocity = lateralRelVelocity + normalComponent + groundVel;
+    }
+
+    void WaterFriction()
+    {
+        float speed = velocity.magnitude;
+        if (speed < 0.01f)
+            return;
+
+        float stopSpeed = 100f;
+
+        float control = Mathf.Max(speed, stopSpeed);
+        float drop = control * waterFriction * Time.fixedDeltaTime;
+
+        float newSpeed = Mathf.Max(speed - drop, 0f);
+        if (newSpeed != speed)
+        {
+            velocity *= newSpeed / speed;
+        }
     }
 
     void Jump()
@@ -269,7 +302,10 @@ public class PlayerMovement : MonoBehaviour
 
     void AddHalfGravity()
     {
-        velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
+        if (waterLevel < 2)
+        {
+            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
+        }
     }
 
     void CapSpeed(float cap)
@@ -282,6 +318,9 @@ public class PlayerMovement : MonoBehaviour
         Vector3 forward = cameraTf.forward;
         Vector3 right = cameraTf.right;
 
+        //this is how tf2 works, it is kinda dumb
+        Vector3 waterWishdir = new Vector3(Input.GetAxisRaw("Horizontal") * right.x + Input.GetAxisRaw("Vertical") * forward.x , Mathf.Clamp(Input.GetAxisRaw("Horizontal") * right.y + Input.GetAxisRaw("Vertical") * forward.y + BoolToFloat(Input.GetButton("Jump")), -1f, 1f), Input.GetAxisRaw("Horizontal") * right.z + Input.GetAxisRaw("Vertical") * forward.z).normalized;
+
         //don't influence add_speed by making the normalized look down and let that component get lost later
         forward.y = 0f;
         right.y = 0f;
@@ -292,8 +331,9 @@ public class PlayerMovement : MonoBehaviour
 
         // Combine movement input
         Vector3 wishdir = (Input.GetAxisRaw("Horizontal") * right + Input.GetAxisRaw("Vertical") * forward).normalized;
-
-        if (ground != null)
+        if (waterLevel > 1) {
+            WaterAccelerate(waterWishdir);
+        } else if (ground != null)
         {
             GroundAccelerate(wishdir, forward);
         }
@@ -301,11 +341,6 @@ public class PlayerMovement : MonoBehaviour
         {
             AirAccelerate(wishdir);
         }
-        //watermovement later
-        //this is weird, maybe like (as this option makes looking up and going forward + pressing jump move even more steeply up): (Input.GetAxisRaw("Horizontal") * right + Input.GetAxisRaw("Vertical") * forward + BoolToFloat(Input.GetButton("Jump")) * Vector3.up).normalized;
-        //Vector3 waterWishdir = new Vector3(Input.GetAxisRaw("Horizontal") * right.x + Input.GetAxisRaw("Vertical") * forward.x , Mathf.Clamp(Input.GetAxisRaw("Horizontal") * right.y + Input.GetAxisRaw("Vertical") * forward.y + BoolToFloat(Input.GetButton("Jump")), -1f, 1f), Input.GetAxisRaw("Horizontal") * right.z + Input.GetAxisRaw("Vertical") * forward.z).normalized;
-    
-        // WaterAccelerate(waterWishdir);
     }
 
     void GroundAccelerate(Vector3 wishdir, Vector3 forward) 
@@ -313,14 +348,14 @@ public class PlayerMovement : MonoBehaviour
         
         Vector3 groundVel = Vector3.zero; //moving platform handling
 
-        if (ground != null)
+        /*if (ground != null)
         {
             MovingPlatform platform = ground.GetComponent<MovingPlatform>();
             if (platform != null)
             {
                 groundVel = platform.GetCurrentVelocity();
             }
-        }
+        }*/
 
         if (hardSpeedCap && (velocity - groundVel).magnitude > walkSpeed * classSpeedMod) velocity = (velocity - groundVel).normalized * walkSpeed * classSpeedMod + groundVel; //not capspeed because groundmovement isn't a flat increase
 
@@ -349,75 +384,44 @@ public class PlayerMovement : MonoBehaviour
         
     }
 
-    void WaterAccelerate(Vector3 wishdir) 
+    void WaterAccelerate(Vector3 wishdir) //TODO: have parity, waterjump when wishdir flat into short ledge and jump down and almost out of water and recheck wishdir calculation above
     {
-        
+        if (Input.GetButton("Jump") && velocity.y < 100f) {
+            velocity = new Vector3(velocity.x, 100f, velocity.z);
+        }
+
+        WaterFriction();
+
+        if (velocity.magnitude <= 48f && wishdir.magnitude < 0.01) { //standing still sinks you
+            velocity = new Vector3(velocity.x, Mathf.Clamp(velocity.y - 6f, -48f, velocity.y), velocity.z);
+        }
+
+        float currentSpeed = Vector3.Dot(velocity, wishdir);
+
+        float wishSpeed = walkSpeed * classSpeedMod * swimSpeedMod;
+
+        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0f, waterAccel * wishSpeed * Time.fixedDeltaTime);
+
+        Vector3 addVel = addSpeed * wishdir;
+
+        if (Input.GetButton("Jump") && velocity.y > 100f  && addVel.y > 0f) {
+            addVel = new Vector3(addVel.x, 0f, addVel.z);
+        }
+
+        velocity = velocity + addVel;
     }
-
-    /*Vector3 GroundCheck(Vector3 pos, float checkDist)
-    {
-        Vector3 ret = pos;
-        float groundYVel = 0f;
-        if (ground != null) {
-            MovingPlatform platform = ground.GetComponent<MovingPlatform>();
-            if (platform != null)
-            {
-                groundYVel = Mathf.Max(0, platform.GetCurrentVelocity().y); //to jump off fast moving platforms...
-            }
-        }
-        if (velocity.y > leaveVelocity + groundYVel)
-        {
-            ground = null;
-            return ret;
-        }
-
-        groundNormal = Vector3.up;
-        
-
-        GameObject found = null;
-        //float distance = 0f;
-        //float minDistance = checkDist;
-        RaycastHit hit = new RaycastHit();
-        float completed = SweptTrace(pos, pos - Vector3.up * checkDist, out hit, out found);
-
-        if (completed >= 1f)
-        {
-            ground = null;
-            groundNormal = Vector3.up;
-            return ret;
-        }
-        //Debug.Log(completed); //ALWAYS 0, HELP, IDK WHY, IT WORKS IN MOVE(...)
-        //Debug.Log(found);
-        
-        if (Vector3.Dot(hit.normal, Vector3.up) >= cosMaxWalkableAngle)
-        {
-            groundNormal = hit.normal;
-        }
-        else
-        {
-            found = null;
-        }
-
-        if (ground != null && found != null)
-        {
-            ret = pos - Vector3.up * hit.distance + Vector3.up * groundExtention;
-        }
-
-        ground = found;
-        return ret;
-    }*/
 
     Vector3 GroundCheck(Vector3 pos, float checkDist)
     {
         Vector3 ret = pos;
         float groundYVel = 0f;
-        if (ground != null) {
+        /*if (ground != null) {
             MovingPlatform platform = ground.GetComponent<MovingPlatform>();
             if (platform != null)
             {
                 groundYVel = Mathf.Max(0, platform.GetCurrentVelocity().y); //to jump off fast moving platforms...
             }
-        }
+        }*/
         if (velocity.y > leaveVelocity + groundYVel)
         {
             ground = null;
@@ -454,7 +458,7 @@ public class PlayerMovement : MonoBehaviour
         foreach (RaycastHit hit in hits)
         {
             float dot = Vector3.Dot(hit.normal, Vector3.up);
-            MeshCollider other = cr.ResolveCollider(hit.collider);
+            MeshCollider other = colliderResolver.ResolveCollider(hit.collider);
             if (hit.distance <= minDistance && tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * checkDist)
                 /*&& !tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, pos, Vector3.down * 0f)*/) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {   //should really gjkshapecast for exact results, just the bpxcast often allows you to jump on walls, as it has an extention, and when close you get a 0 distance upwards facing hit
@@ -471,12 +475,16 @@ public class PlayerMovement : MonoBehaviour
             }
         }
 
-        if (ground != null && found != null)
+        if (ground != null && waterLevel < 2 && found != null)
         {
             ret = pos - Vector3.up * minDistance + Vector3.up * groundExtention;
         }
 
         ground = found;
+        if (found != null) 
+        {
+            usedAirCrouches = 0;
+        }
         return ret;
     }
 
@@ -492,7 +500,7 @@ public class PlayerMovement : MonoBehaviour
         );
         for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
         {
-            if (tracer.GJKPointInside(cr.ResolveCollider(colliders[i]), playerBounds() * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
+            if (tracer.GJKPointInside(colliderResolver.ResolveCollider(colliders[i]), playerBounds() * 0.5f, pos)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             {
                 return true;
             }
@@ -551,7 +559,7 @@ public class PlayerMovement : MonoBehaviour
 
         for (int i = 0; i < hits.Length; ++i)
         {
-            MeshCollider other = cr.ResolveCollider(hits[i].collider);
+            MeshCollider other = colliderResolver.ResolveCollider(hits[i].collider);
             if (tracer.GJKSweptIntersects(other, playerBounds() * 0.5f, startPos, wishmove.normalized * wishdist)) //crouch; getcomponent, all colliders are meshcolliders, this should be faster
             { //this should work, but just never would run with the check
                 ColDist info = new ColDist();
@@ -645,9 +653,9 @@ public class PlayerMovement : MonoBehaviour
         //if collided wall, move playerup 18 units, forwards 0.04 units and stuckcheck+groundcheck to handle stairs
         //if (hit.distance < 1f)
         //{
-            if (ground != null)
+            if (ground != null && waterLevel < 2)
             {
-                Debug.Log(dummyObject);
+                //Debug.Log(dummyObject);
                 Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * (minStepWidth + surfaceExtention) * 7f;
                 if (!UnsweptTrace(testPos)) //do not clip in walls
                 {
@@ -664,6 +672,15 @@ public class PlayerMovement : MonoBehaviour
                         velocity = velocity - remove;
                         return Move(depth - 1, timeLeft - completed * timeLeft, stepped);
                     }
+                }
+            }
+            else if (waterLevel == 2 && velocity.y > 99f && jumpLockOut >= 3) //try jumping out of water
+            {
+                jumpLockOut = 3;
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, 100f, 0f) - hit.normal * (minStepWidth + surfaceExtention) * 7f;
+                if (!UnsweptTrace(testPos)) //do not attempt to jump out of water, and into a wall
+                {
+                    velocity = velocity + new Vector3(hit.normal.x, 0f, hit.normal.z) * 40f + Vector3.up * jumpVelocity;
                 }
             }
         //}
@@ -689,7 +706,7 @@ public class PlayerMovement : MonoBehaviour
     Vector3 HandleCrouch(Vector3 pos)
     {
         Vector3 ret = pos;
-        bool crouchButtonState = Input.GetButton("Crouch");
+        bool crouchButtonState = Input.GetButton("Crouch") && (waterLevel < 2 || (ground == null && waterLevel == 0));
         /*
         if (Input.GetButton("Crouch"))
         {
@@ -700,30 +717,30 @@ public class PlayerMovement : MonoBehaviour
         //if (waterLevel == 3 || (!isGrounded && waterLevel > 0)) {
             //crouchButtonState = false; //it seems to animate standing in tf2, probably calls -crouch
         //}
-        if (crouchButtonState) {
+        if (crouchButtonState && waterLevel < 2) {
             if (!isCrouching) {
                 if (ground == null) {
                     if (usedAirCrouches < maxAirCrouches) {
                         ret = Crouch(pos);
                     }
                 }
-                else if (currentCrouchFrame < crouchAnimLength && !isCrouching)
+                else if (currentCrouchFrame < crouchAnimLength)
                 {
                     ret = AnimateCrouch(pos);
                 }
             }
-            else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength)
+            else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength) //if standing up force to complete the animation
             {
                 ret = AnimateStand(pos);
             }
         }
         else
         {
-            if (ground != null)
+            if (ground != null && waterLevel < 2)
             {
                 ret = AnimateStand(pos);
             }
-            else if (isCrouching)
+            else if (isCrouching || waterLevel > 1)
             {
                 ret = Stand(pos);   
             }
@@ -736,6 +753,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 ret = pos;
         if (isCrouching || usedAirCrouches >= maxAirCrouches)
         {
+            currentCrouchFrame = crouchAnimLength;
             return ret;
         }
         ++usedAirCrouches;
@@ -765,7 +783,8 @@ public class PlayerMovement : MonoBehaviour
         return ret;
     }
 
-    private Vector3 AnimateCrouch(Vector3 pos) {
+    private Vector3 AnimateCrouch(Vector3 pos)
+    {
         if (currentCrouchFrame < crouchAnimLength) {
             currentCrouchFrame++;
         }
@@ -775,15 +794,16 @@ public class PlayerMovement : MonoBehaviour
         return pos;
     }
 
-    private Vector3 AnimateStand(Vector3 pos) {
-        bool wasCrouching = isCrouching;
-        isCrouching = false;
-        if (UnsweptTrace(pos + (wasCrouching ? ((ground != null) ? Vector3.up * 10f : Vector3.down * 10f) : new Vector3(0f, 0f, 0f))))
+    private Vector3 AnimateStand(Vector3 pos)
+    {
+        //bool wasCrouching = isCrouching;
+        //isCrouching = false;
+        if (UnsweptTrace(pos + (isCrouching ? ((ground != null && waterLevel < 2) ? Vector3.up * 10f : Vector3.down * 10f) : new Vector3(0f, 0f, 0f))))
         {
-            isCrouching = wasCrouching;
-            return pos;
+            //isCrouching = wasCrouching;
+            return Crouch(pos);
         }
-        isCrouching = wasCrouching;
+        //isCrouching = wasCrouching;
         if (currentCrouchFrame > 0) {
             currentCrouchFrame--;
         } 
@@ -791,6 +811,44 @@ public class PlayerMovement : MonoBehaviour
             return Stand(pos);
         }
         return pos;
+    }
+
+    //https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/shared/tf/tf_gamemovement.cpp line 1452
+    void EvaluateWater()
+    {
+        Vector3 vecPoint = new Vector3(transform.position.x, transform.position.y - playerBounds().y / 2f + 1f, transform.position.z); //check feet immersed in water first
+        waterLevel = 0;
+        if (CheckWaterAtPoint(vecPoint)) {
+            waterLevel = 1;
+            float flWaistY = transform.position.y + 12f; //tf2 has z for up and hungarian notation apparently floatWaistZ is flWaistZ
+            vecPoint = new Vector3(transform.position.x, camY, transform.position.z);
+            if (CheckWaterAtPoint(vecPoint)) {
+                waterLevel = 3;
+            } else {
+                vecPoint = new Vector3(transform.position.x, flWaistY, transform.position.z);
+                if (CheckWaterAtPoint(vecPoint)) {
+                    waterLevel = 2;
+                }
+            }
+        }
+    }
+
+    bool CheckWaterAtPoint(Vector3 point)
+    {
+        Collider[] colliders = Physics.OverlapBox(
+            point,
+            playerBounds() * 0.5f, //surfaceextention?, crouch?
+            Quaternion.identity,
+            waterMask
+        );
+        for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
+        {
+            if (tracer.GJKPointInside(waterResolver.ResolveCollider(colliders[i]), new Vector3(0f, 0f, 0f), point))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     float BoolToFloat(bool b)
