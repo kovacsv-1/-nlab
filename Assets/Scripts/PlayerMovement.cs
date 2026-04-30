@@ -1,7 +1,8 @@
-using UnityEngine;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Drawing;
+using UnityEngine;
 
 public class PlayerMovement : MonoBehaviour
 {
@@ -57,6 +58,8 @@ public class PlayerMovement : MonoBehaviour
     public float waterAccel = 10f;
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
+    public LayerMask waterMask;
+    public LayerMask triggerMask;
 
     private SweptTraces tracer;
     private GJKClosest gjkClosest;
@@ -72,12 +75,13 @@ public class PlayerMovement : MonoBehaviour
 
     
     public List<GameObject> waterBodies;
-    private float sv_waterdist = 12f;
-    public LayerMask waterMask;
     private float camY = 0f;
 
-    public int waterLevel = 0;
+    private int waterLevel = 0;
 
+    public bool autoBHop = false;
+
+    //TODO: get a mononbehaviour of ground speed, water current and trigger activation
     class ColliderResolver  //to not call a lot of getcomponents
     {
         Dictionary<Collider, MeshCollider> map = new Dictionary<Collider, MeshCollider>();
@@ -94,6 +98,7 @@ public class PlayerMovement : MonoBehaviour
 
     ColliderResolver colliderResolver = new ColliderResolver();
     ColliderResolver waterResolver = new ColliderResolver();
+    ColliderResolver triggerResolver = new ColliderResolver();
 
     struct ColDist
     {
@@ -108,9 +113,6 @@ public class PlayerMovement : MonoBehaviour
         boundingBox = GetComponent<BoxCollider>();
         tracer = GetComponent<SweptTraces>();
         gjkClosest = GetComponent<GJKClosest>();
-        //Application.targetFrameRate = 132;
-        //Physics.defaultContactOffset = 0;
-        // GroundCheck(this.gameObject.transform.position);
     }
 
     // FixedUpdate is called once per tick
@@ -191,7 +193,7 @@ public class PlayerMovement : MonoBehaviour
         } //if stuck in step 1., skip to step 14.
 
         // 14. Check for triggers to activate,
-        // CheckTriggers(newPos);
+        newPos = HandleTriggers(newPos); //todo make triggers have different effects
 
         // 15. Update bounding box,
         transform.position = newPos;
@@ -207,7 +209,7 @@ public class PlayerMovement : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (Input.GetButtonDown("Jump") || Input.GetButton("Jump")) // || autoBHop && Input.GetButton("Jump")
+        if (Input.GetButtonDown("Jump") || autoBHop && Input.GetButton("Jump"))
         {
             jumping = true;
         }
@@ -218,18 +220,7 @@ public class PlayerMovement : MonoBehaviour
     {
         Vector3 groundVel = Vector3.zero;
 
-        /*if (ground != null)
-        {
-            MovingPlatform platform = ground.GetComponent<MovingPlatform>();
-            if (platform != null)
-            {
-                groundVel = platform.GetCurrentVelocity();
-            }
-        }*/
-
         Vector3 relVelocity = velocity - groundVel;
-
-        //Vector3 normal = groundNormal.sqrMagnitude > 0.001f ? groundNormal : Vector3.up;
         
         Vector3 lateralRelVelocity = relVelocity - Vector3.Dot(relVelocity, groundNormal) * groundNormal;
         float speed = lateralRelVelocity.magnitude;
@@ -313,7 +304,8 @@ public class PlayerMovement : MonoBehaviour
         if (velocity.magnitude > cap) velocity = velocity.normalized * cap;
     }
 
-    void Accelerate() 
+    //TODO: get wishdir, waterwishdir, jumping and the checks for jumping in water from another script (like bots or network)
+    void Accelerate()
     {
         Vector3 forward = cameraTf.forward;
         Vector3 right = cameraTf.right;
@@ -346,16 +338,7 @@ public class PlayerMovement : MonoBehaviour
     void GroundAccelerate(Vector3 wishdir, Vector3 forward) 
     {
         
-        Vector3 groundVel = Vector3.zero; //moving platform handling
-
-        /*if (ground != null)
-        {
-            MovingPlatform platform = ground.GetComponent<MovingPlatform>();
-            if (platform != null)
-            {
-                groundVel = platform.GetCurrentVelocity();
-            }
-        }*/
+        Vector3 groundVel = Vector3.zero;
 
         if (hardSpeedCap && (velocity - groundVel).magnitude > walkSpeed * classSpeedMod) velocity = (velocity - groundVel).normalized * walkSpeed * classSpeedMod + groundVel; //not capspeed because groundmovement isn't a flat increase
 
@@ -415,13 +398,7 @@ public class PlayerMovement : MonoBehaviour
     {
         Vector3 ret = pos;
         float groundYVel = 0f;
-        /*if (ground != null) {
-            MovingPlatform platform = ground.GetComponent<MovingPlatform>();
-            if (platform != null)
-            {
-                groundYVel = Mathf.Max(0, platform.GetCurrentVelocity().y); //to jump off fast moving platforms...
-            }
-        }*/
+
         if (velocity.y > leaveVelocity + groundYVel)
         {
             ground = null;
@@ -435,14 +412,7 @@ public class PlayerMovement : MonoBehaviour
         float minDistance = checkDist;
         
         Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
-        Vector3.up / 2; // for the unity docs thing, so we cast from far enough up to have no overlap
-        //"For colliders that overlap the sphere at the start of the sweep,
-        //RaycastHit.normal is set opposite to the direction of the sweep,
-        //RaycastHit.distance is set to zero,
-        //and the zero vector gets returned in RaycastHit.point.
-        //You might want to check whether this is the case in your particular query and perform additional queries to refine the result."
-        //- UnityDocs: Physics.SphereCastAll
-        //WTF?
+        Vector3.up / 2;
         
         RaycastHit[] hits = Physics.BoxCastAll(
             origin,
@@ -575,8 +545,6 @@ public class PlayerMovement : MonoBehaviour
             return 1f;
         }
 
-        //List.Sort(collidedWith, (a, b) => a.dist.CompareTo(b.dist)); //only checking true hits, shouldn't need to sort as that is the order added
-        
         //interate over all collidedwith and gjkclosest + step in the wishdir to distance
         //until min found hit distance < next estimated hit distance + 1f (or another large margin)
         //and return the min distance hit's values with
@@ -612,9 +580,6 @@ public class PlayerMovement : MonoBehaviour
             hit.normal = Vector3.zero;
             return 1f;
         }
-
-        //return hits[0].distance / wishdist; //if 0 distance hit and have velocity towards the object, the hit is still counted...
-        //return hit.distance / wishdist;
     }
 
     Vector3 Move(int depth, float timeLeft, Vector3 startPos)
@@ -687,12 +652,6 @@ public class PlayerMovement : MonoBehaviour
 
         return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized));
     }
-    // Notes: For colliders that overlap the box at the start of the sweep,
-    // RaycastHit.normal is set opposite to the direction of the sweep,
-    // RaycastHit.distance is set to zero,
-    // and the zero vector gets returned in RaycastHit.point.
-    // You might want to check whether this is the case in your particular query and perform additional queries to refine the result.
-    // this can be useful for starting in a wall and leaving it and being fully stuck without being able to leave so we just return start
 
     Vector3 playerBounds()
     {
@@ -707,16 +666,7 @@ public class PlayerMovement : MonoBehaviour
     {
         Vector3 ret = pos;
         bool crouchButtonState = Input.GetButton("Crouch") && (waterLevel < 2 || (ground == null && waterLevel == 0));
-        /*
-        if (Input.GetButton("Crouch"))
-        {
-            return Crouch(pos);
-        }
-        return Stand(pos);
-        */
-        //if (waterLevel == 3 || (!isGrounded && waterLevel > 0)) {
-            //crouchButtonState = false; //it seems to animate standing in tf2, probably calls -crouch
-        //}
+
         if (crouchButtonState && waterLevel < 2) {
             if (!isCrouching) {
                 if (ground == null) {
@@ -740,7 +690,7 @@ public class PlayerMovement : MonoBehaviour
             {
                 ret = AnimateStand(pos);
             }
-            else if (isCrouching || waterLevel > 1)
+            else if (isCrouching || waterLevel > 1 || currentCrouchFrame > 0)
             {
                 ret = Stand(pos);   
             }
@@ -767,7 +717,7 @@ public class PlayerMovement : MonoBehaviour
     Vector3 Stand(Vector3 pos)
     {
         Vector3 ret = pos;
-        if (!isCrouching)
+        if (!isCrouching && currentCrouchFrame == 0)
         {
             return ret;
         }
@@ -776,7 +726,8 @@ public class PlayerMovement : MonoBehaviour
         if (UnsweptTrace(ret)) //would be stuck in geomety, undo it
         {
             isCrouching = true;
-            ret -= (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
+            currentCrouchFrame = crouchAnimLength;
+            ret -= (ground != null || currentCrouchFrame < crouchAnimLength) ? Vector3.up * 10f : Vector3.down * 10f;
         }
         transform.localScale = playerBounds();
         currentCrouchFrame = 0;
@@ -796,14 +747,10 @@ public class PlayerMovement : MonoBehaviour
 
     private Vector3 AnimateStand(Vector3 pos)
     {
-        //bool wasCrouching = isCrouching;
-        //isCrouching = false;
         if (UnsweptTrace(pos + (isCrouching ? ((ground != null && waterLevel < 2) ? Vector3.up * 10f : Vector3.down * 10f) : new Vector3(0f, 0f, 0f))))
         {
-            //isCrouching = wasCrouching;
             return Crouch(pos);
         }
-        //isCrouching = wasCrouching;
         if (currentCrouchFrame > 0) {
             currentCrouchFrame--;
         } 
@@ -851,6 +798,25 @@ public class PlayerMovement : MonoBehaviour
         return false;
     }
 
+    Vector3 HandleTriggers(Vector3 pos)
+    {
+        Vector3 ret = new Vector3(0f, pos.y, 0f);
+        Collider[] colliders = Physics.OverlapBox(
+            pos,
+            playerBounds() * 0.5f, //surfaceextention?, crouch?
+            Quaternion.identity,
+            triggerMask
+        );
+        for (int i = 0; i < colliders.Length; ++i) //check for intersects in GJK algorithm
+        {
+            if (tracer.GJKPointInside(triggerResolver.ResolveCollider(colliders[i]), playerBounds() * 0.5f, pos))
+            {
+                return ret;
+            }
+        }
+        return pos;
+    }
+
     float BoolToFloat(bool b)
     {
         return b ? 1f : 0f;
@@ -858,8 +824,6 @@ public class PlayerMovement : MonoBehaviour
 
     Vector3 Max(Vector3 a, Vector3 b, Vector3 along)
     {
-        //problem: this is the opposite direction when too close, because boxcastall sucks
         return Vector3.Dot(along, a) > Vector3.Dot(along, b) ? a : b;
-        //return b;
     }
 }
