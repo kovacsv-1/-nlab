@@ -665,99 +665,94 @@ public class PlayerMovement : MonoBehaviour
     Vector3 HandleCrouch(Vector3 pos)
     {
         Vector3 ret = pos;
-        bool crouchButtonState = Input.GetButton("Crouch") && (waterLevel < 2 || (ground == null && waterLevel == 0));
-
-        if (crouchButtonState && waterLevel < 2) {
+        bool crouchButtonState = Input.GetButton("Crouch");
+        if (waterLevel == 3 || (ground == null && waterLevel > 0)) {
+            crouchButtonState = false; //it seems to animate standing in tf2, probably calls -crouch
+        }
+        if (crouchButtonState) {
             if (!isCrouching) {
                 if (ground == null) {
                     if (usedAirCrouches < maxAirCrouches) {
-                        ret = Crouch(pos);
+                        ret += new Vector3(0, 20, 0); //upshift to pull legs up instead of head down, this should make headbugs work, but unity doesn't check new collisions on this line, so I'll have to do it manually
+                        Crouch(ref ret);
                     }
                 }
-                else if (currentCrouchFrame < crouchAnimLength)
-                {
-                    ret = AnimateCrouch(pos);
+                else if (currentCrouchFrame < crouchAnimLength && !isCrouching) { //make uncrouch anim fully finish
+                    AnimateCrouch(ref ret);
                 }
+            } else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength) {
+                AnimateStand(ref ret);
             }
-            else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength) //if standing up force to complete the animation
-            {
-                ret = AnimateStand(pos);
-            }
-        }
-        else
-        {
-            if (ground != null && waterLevel < 2)
-            {
-                ret = AnimateStand(pos);
-            }
-            else if (isCrouching || waterLevel > 1 || currentCrouchFrame > 0)
-            {
-                ret = Stand(pos);   
+        } else {
+            if (isCrouching || currentCrouchFrame > 0) { //ctap
+                if (ground == null && Stand(ref ret)) {
+                    ret -= new Vector3(0, 20, 0); //downshift to push legs down instead of head up
+                }
+            } if (ground != null && currentCrouchFrame > 0) {
+                AnimateStand(ref ret);
             }
         }
+        transform.localScale = playerBounds();
         return ret;
     }
 
-    Vector3 Crouch(Vector3 pos)
-    {
-        Vector3 ret = pos;
-        if (isCrouching || usedAirCrouches >= maxAirCrouches)
-        {
-            currentCrouchFrame = crouchAnimLength;
-            return ret;
-        }
+    private bool Crouch(ref Vector3 pos) { //applies bounding box change on crouch
+        if (usedAirCrouches >= maxAirCrouches || isCrouching) return false;
         ++usedAirCrouches;
-        currentCrouchFrame = crouchAnimLength;
         isCrouching = true;
-        transform.localScale = playerBounds();
-        ret += (ground != null) ? Vector3.down * 10f : Vector3.up * 10f;
-        return ret;
-    }
-    
-    Vector3 Stand(Vector3 pos)
-    {
-        Vector3 ret = pos;
-        if (!isCrouching && currentCrouchFrame == 0)
-        {
-            return ret;
-        }
-        isCrouching = false;
-        ret += (ground != null) ? Vector3.up * 10f : Vector3.down * 10f;
-        if (UnsweptTrace(ret)) //would be stuck in geomety, undo it
-        {
-            isCrouching = true;
-            currentCrouchFrame = crouchAnimLength;
-            ret -= (ground != null || currentCrouchFrame < crouchAnimLength) ? Vector3.up * 10f : Vector3.down * 10f;
-        }
-        transform.localScale = playerBounds();
-        currentCrouchFrame = 0;
-        return ret;
+        currentCrouchFrame = crouchAnimLength; //set to full crouch to not animate crouching on landing
+
+        // shift collider down (unity scales to center, so by half of tf2's upshift, this also makes the camera stay in the correct spot)
+        pos = pos + new Vector3(0f, -10f, 0f);
+        //checkground -> shift up, but this doesn't happen on ctap, so idk
+        return true;
     }
 
-    private Vector3 AnimateCrouch(Vector3 pos)
-    {
-        if (currentCrouchFrame < crouchAnimLength) {
+    private bool Stand(ref Vector3 pos) { //applies bounding box change on stand
+        if (CanStand(pos)) {
+            isCrouching = false;
+            currentCrouchFrame = 0; //set to full stand to not animate standing up on landing
+            pos = pos + new Vector3(0f, 10f, 0f);
+            return true;
+        }
+        --usedAirCrouches; //this is here for ctap enjoyers
+        if (!Crouch(ref pos)) //this is why the shift up isn't in the crouch function
+        {
+            ++usedAirCrouches;
+        }
+        return false; //for the shifting to be conditional (just spamming crouch while cannot iuncrouch shouldn't teleport you up)
+    }
+
+    private void AnimateCrouch(ref Vector3 pos) {
+        if (currentCrouchFrame < crouchAnimLength)
+        {
             currentCrouchFrame++;
         }
-        if (currentCrouchFrame == crouchAnimLength) {
-            return Crouch(pos);
+        if (currentCrouchFrame == crouchAnimLength)
+        {
+            Crouch(ref pos);
         }
-        return pos;
     }
 
-    private Vector3 AnimateStand(Vector3 pos)
-    {
-        if (UnsweptTrace(pos + (isCrouching ? ((ground != null && waterLevel < 2) ? Vector3.up * 10f : Vector3.down * 10f) : new Vector3(0f, 0f, 0f))))
+    private void AnimateStand(ref Vector3 pos) {
+        if (!CanStand(pos)) return;
+        if (currentCrouchFrame > 0)
         {
-            return Crouch(pos);
-        }
-        if (currentCrouchFrame > 0) {
             currentCrouchFrame--;
         } 
-        if (currentCrouchFrame == 0) {
-            return Stand(pos);
+        if (currentCrouchFrame == 0)
+        {
+            Stand(ref pos);
         }
-        return pos;
+    }
+
+    bool CanStand(Vector3 pos) {
+        Vector3 origin = pos + Vector3.down * 10f * (ground != null ? -1f : 1f);
+        bool wasCrouching = isCrouching;
+        isCrouching = false;
+        bool cantStand = UnsweptTrace(origin);
+        isCrouching = wasCrouching;
+        return !cantStand;
     }
 
     //https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/shared/tf/tf_gamemovement.cpp line 1452
@@ -825,5 +820,10 @@ public class PlayerMovement : MonoBehaviour
     Vector3 Max(Vector3 a, Vector3 b, Vector3 along)
     {
         return Vector3.Dot(along, a) > Vector3.Dot(along, b) ? a : b;
+    }
+
+    public bool GetCrouching()
+    {
+        return isCrouching;
     }
 }
