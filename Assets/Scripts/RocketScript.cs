@@ -28,7 +28,7 @@ public class RocketScript : MonoBehaviour
 
     public void setDir(Vector3 facing) {
         dir = facing; //cam.forward in movement
-        rb.linearVelocity = dir * rocketSpeed;
+        //rb.linearVelocity = dir * rocketSpeed;
     }
 
     public void applyOffset(Transform cam) { //call when spawning

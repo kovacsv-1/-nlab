@@ -605,10 +605,19 @@ public class PlayerMovement : MonoBehaviour
         {
             //stuck in something, if by going towards endPos, we leave it, move to where it the box would fully leave the collider, that is the distance traveled
             //if cannot escape, just end with startPos
-            //for now...
-            //return Move(depth - 1, timeLeft - completed * timeLeft, startPos + (wishpos - startPos) * completed + surfaceExtention * hit.normal);
-            //velocity = velocity + Math.Abs(Vector3.Dot(velocity, hit.normal)) * hit.normal;
-            velocity = velocity + remove;
+            RaycastHit backHit;
+            float backCompleted = SweptTrace(startPos, wishpos, out backHit, out dummyObject); //this cannot be >= 1.0f, because then we wouldn't already be inside geometry
+            if (backCompleted >= 1.0f) //not actually in geometry according to this check, shouldn't happen, also backHit.normal would be 0, so the surfaceextension would do nothing
+            {
+                return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * backCompleted + surfaceExtention * backHit.normal, (wishpos - startPos).normalized);
+            }
+            if (backCompleted == 0f) //completely stuck, cannot move, for some reason this happens a lot when it shouldn't
+            {
+                velocity = Vector3.zero;
+                return startPos;
+            }
+            //move enough to just leave geometry to get unstuck,
+            return Move(depth - 1, timeLeft - (1.0f - backCompleted) * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * (1.0f - backCompleted) + surfaceExtention * backHit.normal, (wishpos - startPos).normalized));
         }
         else
         {
@@ -621,7 +630,7 @@ public class PlayerMovement : MonoBehaviour
             if (ground != null && waterLevel < 2)
             {
                 //Debug.Log(dummyObject);
-                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * (minStepWidth + surfaceExtention) * 7f;
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * minStepWidth;
                 if (!UnsweptTrace(testPos)) //do not clip in walls
                 {
                     GameObject oldGround = ground;
@@ -642,7 +651,7 @@ public class PlayerMovement : MonoBehaviour
             else if (waterLevel == 2 && velocity.y > 99f && jumpLockOut >= 3) //try jumping out of water
             {
                 jumpLockOut = 3;
-                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, 100f, 0f) - hit.normal * (minStepWidth + surfaceExtention) * 7f;
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, 100f, 0f) - hit.normal * minStepWidth;
                 if (!UnsweptTrace(testPos)) //do not attempt to jump out of water, and into a wall
                 {
                     velocity = velocity + new Vector3(hit.normal.x, 0f, hit.normal.z) * 40f + Vector3.up * jumpVelocity;

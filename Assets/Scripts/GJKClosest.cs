@@ -110,8 +110,8 @@ public class GJKClosest : MonoBehaviour
         Vector3 lastNonZeroDir = Vector3.zero;
         SimplexSolve p_dir = new SimplexSolve();
         // if one triangle is unnecessarily huge, epsilon might not be large enough to check directional values against each other if its almost exactly touching
-        for (int i = 0; i < 40; ++i)
-        { //40 iterations of loop to converge
+        for (int i = 0; i < 60; ++i)
+        { //60 iterations of loop to converge
 
             // solving direction from cross products gives much more accuracy than resolving from p
             // resolving from p can result in infinite loops when epsilon is too small to check directional differences
@@ -277,7 +277,7 @@ public class GJKClosest : MonoBehaviour
         GJKHit ret = new GJKHit();
         GJKHit prev = new GJKHit();
 
-        for (int step = 0; step < 30; step++)
+        for (int step = 0; step < 40; step++)
         {
             GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, dir); //just direction for wishmove, doesn't take distance
             // overlap
@@ -292,19 +292,23 @@ public class GJKClosest : MonoBehaviour
                 ret.normal = prev.normal.magnitude > 0 ? prev.normal : gjk.normal;
                 //ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, dir).normal;
                 ret.point = gjk.point;
+                Debug.Log("A");
+                Debug.Log(ret.distance); //always 0???
                 return ret;
             }
             
 
-            float denom = -Vector3.Dot(gjk.normal, dir);
+            float denom = Vector3.Dot(gjk.normal, dir); //* -1.0f
 
             // moving away, this shouldn't happen as I check for collisions in sweep ahead of time, but this is what is causing the issue
-            //if (denom >= 0) //for some reason this case runs on the last frame I am outside of geometry, this gets me stuck somehow
-            //{
-                //ret.hit = false;
-                //Debug.Log('2');
-                //return ret;
-            //}
+            if (denom <= -EPSILON) //for some reason this case runs on the last frame I am outside of geometry, this gets me stuck somehow
+            {
+                ret.hit = false;
+                Debug.Log("E");
+                ret.distance = (x - playerPos).magnitude;
+                Debug.Log(ret.distance); //always 0???
+                return ret;
+            }
 
             //float stepDist = gjk.distance;
             float stepDist = gjk.distance / denom;
@@ -313,6 +317,8 @@ public class GJKClosest : MonoBehaviour
             {
                 ret.hit = false;
                 //this gets us stuck in slopes and on ground sometimes, idk how
+                Debug.Log("B");
+                Debug.Log(ret.distance); //always 0???
                 return ret;
             }
             stepDist = Math.Max(0f, stepDist); //always have small margin, so we don't actually hit, and get bad separation
@@ -324,6 +330,8 @@ public class GJKClosest : MonoBehaviour
             if (remaining <= EPSILON)
             {
                 ret.hit = false;
+                Debug.Log("C");
+                Debug.Log(ret.distance); //always 0???
                 return ret;
             }
 
@@ -338,6 +346,8 @@ public class GJKClosest : MonoBehaviour
         }
         ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove).normal;
         //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
+        Debug.Log("D"); //only this happens, only see D and 0 on console, idk why
+        Debug.Log(ret.distance); //always 0???
         return ret;
     }
 
