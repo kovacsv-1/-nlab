@@ -15,7 +15,8 @@ public class PlayerMovement : MonoBehaviour
     private const float leaveVelocity = 250f;
     private const float cosMaxWalkableAngle = 0.7f; //cos(45.58)
     private const float maxStepHeight = 18f;
-    private const float minStepWidth = 0.04f;
+    public float minStepWidth = 0.04f;
+    public float stepTeleDist = 0.04f;
     public float gravity = 800f;
     private const float jumpVelocity = 289f;
     public float bhopCap = 1.2f; //tf2 reduces your velocity to your walkspeed * 1.2 after a jump to nerf bhopping
@@ -74,7 +75,7 @@ public class PlayerMovement : MonoBehaviour
     private int jumpLockOut = 3;
 
     
-    public List<GameObject> waterBodies;
+    //public List<GameObject> waterBodies;
     private float camY = 0f;
 
     private int waterLevel = 0;
@@ -613,7 +614,7 @@ public class PlayerMovement : MonoBehaviour
             }
             if (backCompleted == 0f) //completely stuck, cannot move, for some reason this happens a lot when it shouldn't
             {
-                velocity = Vector3.zero;
+                velocity = Vector3.zero; //unswept trace does this better
                 return startPos;
             }
             //move enough to just leave geometry to get unstuck,
@@ -635,6 +636,7 @@ public class PlayerMovement : MonoBehaviour
                 {
                     GameObject oldGround = ground;
                     Vector3 oldNormal = groundNormal;
+                    testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * stepTeleDist;
                     Vector3 stepped = GroundCheck(testPos, maxStepHeight + groundExtention * 3f); //stepped would ground us as we only check when grounded, this is the position we keep going
                     if (ground == null || oldGround == ground)
                     {
