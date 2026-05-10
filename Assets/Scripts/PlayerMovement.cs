@@ -74,13 +74,19 @@ public class PlayerMovement : MonoBehaviour
     private int usedAirCrouches = 0;
     private int jumpLockOut = 3;
 
-    
-    //public List<GameObject> waterBodies;
     private float camY = 0f;
 
     private int waterLevel = 0;
 
     public bool autoBHop = false;
+
+    private bool jumpButtonPressed = false;
+    private bool jumpButtonHeld = false;
+    private bool crouchButtonHeld = false;
+    private bool fire1ButtonHeld = false;
+    private bool fire2ButtonHeld = false;
+    private float horizontalInput = 0f;
+    private float verticalInput = 0f;
 
     //TODO: get a mononbehaviour of ground speed, water current and trigger activation
     class ColliderResolver  //to not call a lot of getcomponents
@@ -210,7 +216,7 @@ public class PlayerMovement : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (Input.GetButtonDown("Jump") || autoBHop && Input.GetButton("Jump"))
+        if (jumpButtonPressed || autoBHop && jumpButtonHeld)
         {
             jumping = true;
         }
@@ -312,7 +318,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 right = cameraTf.right;
 
         //this is how tf2 works, it is kinda dumb
-        Vector3 waterWishdir = new Vector3(Input.GetAxisRaw("Horizontal") * right.x + Input.GetAxisRaw("Vertical") * forward.x , Mathf.Clamp(Input.GetAxisRaw("Horizontal") * right.y + Input.GetAxisRaw("Vertical") * forward.y + BoolToFloat(Input.GetButton("Jump")), -1f, 1f), Input.GetAxisRaw("Horizontal") * right.z + Input.GetAxisRaw("Vertical") * forward.z).normalized;
+        Vector3 waterWishdir = new Vector3(horizontalInput * right.x + verticalInput * forward.x , Mathf.Clamp(horizontalInput * right.y + verticalInput * forward.y + BoolToFloat(jumpButtonHeld), -1f, 1f), horizontalInput * right.z + verticalInput * forward.z).normalized;
 
         //don't influence add_speed by making the normalized look down and let that component get lost later
         forward.y = 0f;
@@ -323,7 +329,7 @@ public class PlayerMovement : MonoBehaviour
         right.Normalize();
 
         // Combine movement input
-        Vector3 wishdir = (Input.GetAxisRaw("Horizontal") * right + Input.GetAxisRaw("Vertical") * forward).normalized;
+        Vector3 wishdir = (horizontalInput * right + verticalInput * forward).normalized;
         if (waterLevel > 1) {
             WaterAccelerate(waterWishdir);
         } else if (ground != null)
@@ -370,7 +376,7 @@ public class PlayerMovement : MonoBehaviour
 
     void WaterAccelerate(Vector3 wishdir) //TODO: have parity, waterjump when wishdir flat into short ledge and jump down and almost out of water and recheck wishdir calculation above
     {
-        if (Input.GetButton("Jump") && velocity.y < 100f) {
+        if (jumpButtonHeld && velocity.y < 100f) {
             velocity = new Vector3(velocity.x, 100f, velocity.z);
         }
 
@@ -388,7 +394,7 @@ public class PlayerMovement : MonoBehaviour
 
         Vector3 addVel = addSpeed * wishdir;
 
-        if (Input.GetButton("Jump") && velocity.y > 100f  && addVel.y > 0f) {
+        if (jumpButtonHeld && velocity.y > 100f  && addVel.y > 0f) {
             addVel = new Vector3(addVel.x, 0f, addVel.z);
         }
 
@@ -676,7 +682,7 @@ public class PlayerMovement : MonoBehaviour
     Vector3 HandleCrouch(Vector3 pos)
     {
         Vector3 ret = pos;
-        bool crouchButtonState = Input.GetButton("Crouch");
+        bool crouchButtonState = crouchButtonHeld;
         if (waterLevel == 3 || (ground == null && waterLevel > 0)) {
             crouchButtonState = false; //it seems to animate standing in tf2, probably calls -crouch
         }
@@ -836,5 +842,16 @@ public class PlayerMovement : MonoBehaviour
     public bool GetCrouching()
     {
         return isCrouching;
+    }
+
+    public void SetInputs(bool jumpDown, bool jumpHeld, bool crouchHeld, bool fire1Held, bool fire2Held, float horizontal, float vertical)
+    {
+        jumpButtonPressed = jumpDown;
+        jumpButtonHeld = jumpHeld;
+        crouchButtonHeld = crouchHeld;
+        fire1ButtonHeld = fire1Held;
+        fire2ButtonHeld = fire2Held;
+        horizontalInput = horizontal;
+        verticalInput = vertical;
     }
 }
