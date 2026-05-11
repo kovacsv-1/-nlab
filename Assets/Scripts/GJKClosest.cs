@@ -313,12 +313,13 @@ public class GJKClosest : MonoBehaviour
             //float stepDist = gjk.distance;
             float stepDist = gjk.distance / denom;
 
-            if (stepDist > remaining)
+            if (stepDist > remaining && remaining > EPSILON)
             {
                 ret.hit = false;
+                ret.distance = wishdist;
                 //this gets us stuck in slopes and on ground sometimes, idk how
                 Debug.Log("B");
-                Debug.Log(ret.distance); //always 0???
+                Debug.Log(ret.distance);
                 return ret;
             }
             stepDist = Math.Max(0f, stepDist); //always have small margin, so we don't actually hit, and get bad separation
@@ -618,6 +619,34 @@ public class GJKClosest : MonoBehaviour
                 cartesian1 = ConvertCartesian(simplex.a1, simplex.b1, simplex.c1, v3barycentric);
                 cartesian2 = ConvertCartesian(simplex.a2, simplex.b2, simplex.c2, v3barycentric);
                 ret.p = cartesian1; ret.dir = cartesian2;
+                return ret;
+            case 4:
+                // Compute barycentric coordinates of p (which should be 0) inside the CSO tetrahedron
+                Vector3 A = simplex.a, B = simplex.b, C = simplex.c, D = simplex.d;
+                // Volumes of sub-tetrahedra (signed)
+                float volABC = Vector3.Dot(Vector3.Cross(B - A, C - A), D - A);
+                float volPBC = Vector3.Dot(Vector3.Cross(B - p, C - p), D - p);
+                float volAPC = Vector3.Dot(Vector3.Cross(C - p, A - p), D - p);
+                float volABP = Vector3.Dot(Vector3.Cross(A - p, B - p), D - p);
+                float volABCP = Vector3.Dot(Vector3.Cross(B - A, C - A), p - A);
+
+                // Avoid division by zero (simplex should be non-degenerate)
+                if (Mathf.Abs(volABC) < EPSILON)
+                {
+                    ret.p = Vector3.zero; ret.dir = Vector3.zero;
+                    return ret;
+                }
+                float inv = 1.0f / volABC;
+                float u = volPBC * inv; // weight for A
+                float v = volAPC * inv; // weight for B
+                float w = volABP * inv; // weight for C
+                float z = volABCP * inv;// weight for D
+
+                // Interpolate world-space points
+                cartesian1 = u * simplex.a1 + v * simplex.b1 + w * simplex.c1 + z * simplex.d1;
+                cartesian2 = u * simplex.a2 + v * simplex.b2 + w * simplex.c2 + z * simplex.d2;
+                ret.p = cartesian1;
+                ret.dir = cartesian2;
                 return ret;
             default:
                 ret.p = Vector3.zero; ret.dir = Vector3.zero;

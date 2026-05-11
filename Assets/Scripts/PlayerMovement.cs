@@ -6,45 +6,7 @@ using UnityEngine;
 
 public class PlayerMovement : MonoBehaviour
 {
-    //values taken from tf2:
-    //tickrate: 66.6...; a tick is 0.015 seconds
-    private const float surfaceExtention = 0.03125f;
-    private const float groundExtention = 0.705f;
-    private const float groundingHeight = 2f;
-    private const float maxVelocity = 3500f;
-    private const float leaveVelocity = 250f;
-    private const float cosMaxWalkableAngle = 0.7f; //cos(45.58)
-    private const float maxStepHeight = 18f;
-    public float minStepWidth = 0.04f;
-    public float stepTeleDist = 0.04f;
-    public float gravity = 800f;
-    private const float jumpVelocity = 289f;
-    public float bhopCap = 1.2f; //tf2 reduces your velocity to your walkspeed * 1.2 after a jump to nerf bhopping
-    private const float walkSpeed = 300f;
-    private const float airSpeed = 30f;
-    public float classSpeedMod = 0.8f; //soldier
-    private const float friction = 4f; //friction for regular ground, idk what ice uses, or if there even are ice physics in the engine
-    private const float waterFriction = 1f;
-    private const float stopSpeed = 100f; //the speed at which friction will stop you, if your velocity is less than this, it will be set to 0 instead of being reduced by friction
-    private const float duckSpeedMod = 1f / 3f; //tf2 reduces your max walking speed to 1/3 of your normal speed when ducking
-    private const float backSpeedMod = 0.9f; //tf2 reduces your max walking speed to 90% when walking backwards
-    private const float swimSpeedMod = 0.8f;
-    private const float boundingBoxWidth = 48f; // or 49
-    private const float standingBoundingBoxHeight = 82f; // or 83
-    private const float duckingBoundingBoxHeight = 62f; // or 63
-    private const float oldDuckingBoundingBoxHeight = 55f;
-    private const float standingViewHeight = 68f; // 65 for scout, 75 for heavy and support classes
-    private const float duckingViewHeight = 45f;
-    //idk, dude, this game is weird: https://www.youtube.com/watch?v=AUPBC5W1KHo
-    private const float minAimAssistDist = 200f;
-    private const float maxAimAssistDist = 2000f;
-    //projectile spawning location offsets from camera when firing
-    private const float forwardProjectileOffset = 23.5f;
-    private const float standingUpwardProjectileOffset = -3f;
-    private const float duckingUpwardProjectileOffset = 8f;
-    private const float stockRightwardProjectileOffset = 15f;
-    private const float cowManglerRightwardProjectileOffset = 8f; 
-    private const float originalRightwardProjectileOffset = 0f;
+    public MovementVariables playerVariables;
 
     private Vector3 velocity = new Vector3(0f, 0f, 0f);
     private GameObject ground = null;
@@ -52,11 +14,7 @@ public class PlayerMovement : MonoBehaviour
     private Vector3 groundNormal = new Vector3(0f, 1f, 0f);
     private bool isCrouching = false;
     private bool jumping = false;
-    public bool hardSpeedCap = true;
     private Transform cameraTf;
-    public float groundAccel = 10f; //reach max speed in 0.1s
-    public float airAccel = 10f;
-    public float waterAccel = 10f;
     private BoxCollider boundingBox;
     public LayerMask colliderMask;
     public LayerMask waterMask;
@@ -65,14 +23,10 @@ public class PlayerMovement : MonoBehaviour
     private SweptTraces tracer;
     private GJKClosest gjkClosest;
 
-    List<Vector3> poss = new List<Vector3>();
-    List<Vector3> dirst = new List<Vector3>();
-
-    public int crouchAnimLength = 6; // 6/66.6...s to crouch/uncrouch 
     private int currentCrouchFrame = 0; // 0 -> fully standing; crouchAnimLength -> fully crouched
-    private int maxAirCrouches = 2;
     private int usedAirCrouches = 0;
-    private int jumpLockOut = 3;
+    private int usedMidAirJumps = 0;
+    private int jumpLockOut = 0;
 
     private float camY = 0f;
 
@@ -125,7 +79,7 @@ public class PlayerMovement : MonoBehaviour
     // FixedUpdate is called once per tick
     void FixedUpdate()
     {
-        if (jumpLockOut < 3)
+        if (jumpLockOut < playerVariables.jumpLockOutLength)
         {
             jumpLockOut++;
         }
@@ -141,7 +95,7 @@ public class PlayerMovement : MonoBehaviour
         else //if stuck
         {
             //  2. If going up too fast, become airborne,
-            if (velocity.y > leaveVelocity) //TODO: rising platforms influence this
+            if (velocity.y > playerVariables.leaveVelocity) //TODO: rising platforms influence this
             {
                 ground = null;
             }
@@ -153,13 +107,17 @@ public class PlayerMovement : MonoBehaviour
             AddHalfGravity();
 
             //  5. Handle jumping,
-            if (ground != null && waterLevel < 2 && jumping && !isCrouching && jumpLockOut >= 3)
+            if (ground != null && waterLevel < 2 && jumping && !isCrouching && jumpLockOut >= playerVariables.jumpLockOutLength)
             {
                 Jump();
             }
+            else if (ground == null && waterLevel < 2 && jumping && jumpLockOut >= playerVariables.jumpLockOutLength && usedMidAirJumps < playerVariables.midAirJumps)
+            {
+                MidAirJump();
+            }
 
             //  6. Cap velocity,
-            CapSpeed(maxVelocity);
+            CapSpeed(playerVariables.maxVelocity);
 
             //  7. If on ground, zero out vertical velocity and apply friction,
             if (waterLevel > 1)
@@ -178,12 +136,12 @@ public class PlayerMovement : MonoBehaviour
             newPos = Move(4, Time.fixedDeltaTime, newPos);
             if (ground != null && waterLevel < 2)
             {
-                newPos = GroundCheck(newPos, maxStepHeight + groundExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
+                newPos = GroundCheck(newPos, playerVariables.maxStepHeight + playerVariables.groundExtention * 1.1f); // * 1.079925477505f); //step down (yes, this is stupid, but I already have it implemented, so it should be fine)
             }
             //handle step up on collision, step down at the end of frame
 
             // 10. Check for ground to stand on,
-            newPos = GroundCheck(newPos, groundingHeight);
+            newPos = GroundCheck(newPos, playerVariables.groundingHeight);
 
             // 11. Apply other half of gravity,
             AddHalfGravity();
@@ -195,7 +153,7 @@ public class PlayerMovement : MonoBehaviour
             }
 
             // 13. Cap velocity,
-            CapSpeed(maxVelocity);
+            CapSpeed(playerVariables.maxVelocity);
 
         } //if stuck in step 1., skip to step 14.
 
@@ -204,7 +162,7 @@ public class PlayerMovement : MonoBehaviour
 
         // 15. Update bounding box,
         transform.position = newPos;
-        camY = newPos.y - playerBounds().y / 2f + (standingViewHeight - (standingViewHeight - duckingViewHeight) * currentCrouchFrame / crouchAnimLength);
+        camY = newPos.y - playerBounds().y / 2f + (playerVariables.standingViewHeight - (playerVariables.standingViewHeight - playerVariables.duckingViewHeight) * currentCrouchFrame / playerVariables.crouchAnimLength);
         cameraTf.position = new Vector3(newPos.x, camY, newPos.z);
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
@@ -234,8 +192,8 @@ public class PlayerMovement : MonoBehaviour
         if (speed < 0.01f)
             return;
 
-        float control = Mathf.Max(speed, stopSpeed);
-        float drop = control * friction * Time.fixedDeltaTime;
+        float control = Mathf.Max(speed, playerVariables.stopSpeed);
+        float drop = control * playerVariables.friction * Time.fixedDeltaTime;
 
         float newSpeed = Mathf.Max(speed - drop, 0f);
         if (newSpeed != speed)
@@ -257,7 +215,7 @@ public class PlayerMovement : MonoBehaviour
         float stopSpeed = 100f;
 
         float control = Mathf.Max(speed, stopSpeed);
-        float drop = control * waterFriction * Time.fixedDeltaTime;
+        float drop = control * playerVariables.waterFriction * Time.fixedDeltaTime;
 
         float newSpeed = Mathf.Max(speed - drop, 0f);
         if (newSpeed != speed)
@@ -271,13 +229,13 @@ public class PlayerMovement : MonoBehaviour
         usedAirCrouches = 0;
         jumpLockOut = 0;
         //  1. Cap speed,
-        CapSpeed(walkSpeed * classSpeedMod * bhopCap);
+        CapSpeed(playerVariables.walkSpeed * playerVariables.classSpeedMod * playerVariables.bhopCap);
 
         if (Vector3.Dot(groundNormal, Vector3.up) < 1f)
         {   //so we don't jump towards the slope every time we jump
-            velocity = velocity + (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal;
+            velocity = velocity + (playerVariables.gravity * 0.5f * Time.fixedDeltaTime) * groundNormal;
             velocity = new Vector3(velocity.x, 0f, velocity.z);
-            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up;
+            velocity = velocity - (playerVariables.gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up;
         }
 
         //  2. Unground the player,
@@ -285,24 +243,92 @@ public class PlayerMovement : MonoBehaviour
         groundNormal = Vector3.up;
 
         //  3. Apply jump velocity,
-        if (currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength)
+        if (currentCrouchFrame > 0 && currentCrouchFrame < playerVariables.crouchAnimLength)
         {
-            velocity = new Vector3(velocity.x, jumpVelocity, velocity.z);
+            velocity = new Vector3(velocity.x, playerVariables.jumpVelocity, velocity.z);
         }
         else 
         {
-            velocity = new Vector3(velocity.x, velocity.y + jumpVelocity, velocity.z);
+            velocity = new Vector3(velocity.x, velocity.y + playerVariables.jumpVelocity, velocity.z);
         }
 
         //  4. Apply half of gravity
         AddHalfGravity();
     }
 
+    void MidAirJump()
+    {
+        Vector3 forward = cameraTf.forward;
+        Vector3 right = cameraTf.right;
+        forward.y = 0f;
+        right.y = 0f;
+        forward.Normalize();
+        right.Normalize();
+        Vector3 wishdir = (horizontalInput * right + verticalInput * forward).normalized;
+
+        jumpLockOut = 0;
+        //  1. don't Cap speed,
+
+        //  2. Unground the player, redundant
+        ground = null;
+        groundNormal = Vector3.up;
+
+        //  3. Apply jump velocity,
+        switch (playerVariables.midAirJumpSetsVertical) 
+        {
+            case 0:
+                velocity = velocity + Vector3.up * playerVariables.jumpVelocity;
+                break;
+            case 1:
+                velocity = new Vector3(velocity.x, playerVariables.jumpVelocity, velocity.z);
+                break;
+            case 2:
+                if (velocity.y <= 0)
+                {
+                    velocity = new Vector3(velocity.x, playerVariables.jumpVelocity, velocity.z);
+                }
+                else
+                {
+                    velocity = velocity + Vector3.up * playerVariables.jumpVelocity;
+                }
+                break;
+            default:
+                break;
+        }
+
+        float wishSpeed = 0f;
+
+        switch (playerVariables.midAirJumpSetsHorizontal)
+        {
+            case 0:
+                //does fuckall
+                break;
+            case 1:
+                //this is what tf2 does and it is weird
+                wishSpeed = playerVariables.walkSpeed * playerVariables.classSpeedMod * (isCrouching && playerVariables.airCrouchScalesSpeed ? playerVariables.duckSpeedMod : 1);
+                velocity = new Vector3((wishSpeed * wishdir).x, velocity.y, (wishSpeed * wishdir).z);
+                break;
+            case 2:
+                Vector3 horizontalVel = new Vector3(velocity.x, 0, velocity.z);
+                wishSpeed = playerVariables.walkSpeed * playerVariables.classSpeedMod * (isCrouching && playerVariables.airCrouchScalesSpeed ? playerVariables.duckSpeedMod : 1);
+                Vector3 addVel = (wishSpeed - Vector3.Dot(horizontalVel, wishdir)) * wishdir;
+                velocity = addVel + velocity;
+                break;
+            default:
+                break;
+        }
+
+        //  4. Apply half of gravity
+        AddHalfGravity();
+
+        ++usedMidAirJumps;
+    }
+
     void AddHalfGravity()
     {
         if (waterLevel < 2)
         {
-            velocity = velocity - (gravity * 0.5f * Time.fixedDeltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
+            velocity = velocity - (playerVariables.gravity * 0.5f * Time.fixedDeltaTime) * groundNormal; //TODO: if grounded on slopes this is weird, might slide down
         }
     }
 
@@ -347,15 +373,15 @@ public class PlayerMovement : MonoBehaviour
         
         Vector3 groundVel = Vector3.zero;
 
-        if (hardSpeedCap && (velocity - groundVel).magnitude > walkSpeed * classSpeedMod) velocity = (velocity - groundVel).normalized * walkSpeed * classSpeedMod + groundVel; //not capspeed because groundmovement isn't a flat increase
+        if (playerVariables.hardSpeedCap && (velocity - groundVel).magnitude > playerVariables.walkSpeed * playerVariables.classSpeedMod) velocity = (velocity - groundVel).normalized * playerVariables.walkSpeed * playerVariables.classSpeedMod + groundVel; //not capspeed because groundmovement isn't a flat increase
 
         //weird ass code in quake, makes zigzagging and wallstrafing (as well as airstrafing, but different) work
         float currentSpeed = Vector3.Dot(velocity - groundVel, Vector3.ProjectOnPlane(wishdir, groundNormal).normalized);
         bool movingBackward = Vector3.Dot(wishdir, forward) < -0.5f;
-        float wishSpeed = walkSpeed * classSpeedMod * (isCrouching ? duckSpeedMod : 1) * (movingBackward && !isCrouching ? backSpeedMod : 1);
+        float wishSpeed = playerVariables.walkSpeed * playerVariables.classSpeedMod * (isCrouching ? playerVariables.duckSpeedMod : 1) * (movingBackward && !isCrouching ? playerVariables.backSpeedMod : 1);
 
         //this does way too much, but this is what clamp is for (the crouching and backwards check was added after this comment was already written, but it didn't stop me)
-        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0, groundAccel * wishSpeed * Time.fixedDeltaTime);
+        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0, playerVariables.groundAccel * wishSpeed * Time.fixedDeltaTime);
 
         //return new velocity
         velocity = velocity + addSpeed * Vector3.ProjectOnPlane(wishdir, groundNormal).normalized;
@@ -365,9 +391,10 @@ public class PlayerMovement : MonoBehaviour
     {
         //weird ass code in quake, makes airstrafing work
         float currentSpeed = Vector3.Dot(velocity, wishdir);
+        float wishSpeed = playerVariables.walkSpeed * playerVariables.classSpeedMod * (isCrouching && playerVariables.airCrouchScalesSpeed ? playerVariables.duckSpeedMod : 1);
 
         //this does way too much, but this is what clamp is for
-        float addSpeed = Mathf.Clamp(airSpeed - currentSpeed, 0, airAccel * airSpeed * Time.fixedDeltaTime);
+        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0, playerVariables.airAccel * playerVariables.airSpeed * Time.fixedDeltaTime);
 
         //return new velocity
         velocity = velocity + addSpeed * wishdir;
@@ -388,9 +415,9 @@ public class PlayerMovement : MonoBehaviour
 
         float currentSpeed = Vector3.Dot(velocity, wishdir);
 
-        float wishSpeed = walkSpeed * classSpeedMod * swimSpeedMod;
+        float wishSpeed = playerVariables.walkSpeed * playerVariables.classSpeedMod * playerVariables.swimSpeedMod;
 
-        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0f, waterAccel * wishSpeed * Time.fixedDeltaTime);
+        float addSpeed = Mathf.Clamp(wishSpeed - currentSpeed, 0f, playerVariables.waterAccel * wishSpeed * Time.fixedDeltaTime);
 
         Vector3 addVel = addSpeed * wishdir;
 
@@ -406,7 +433,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 ret = pos;
         float groundYVel = 0f;
 
-        if (velocity.y > leaveVelocity + groundYVel)
+        if (velocity.y > playerVariables.leaveVelocity + groundYVel)
         {
             ground = null;
             return ret;
@@ -418,12 +445,12 @@ public class PlayerMovement : MonoBehaviour
         float distance = 0f;
         float minDistance = checkDist;
         
-        Vector3 origin = pos + Vector3.down * (isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight) / 2 +
+        Vector3 origin = pos + Vector3.down * (isCrouching ? playerVariables.duckingBoundingBoxHeight : playerVariables.standingBoundingBoxHeight) / 2 +
         Vector3.up / 2;
         
         RaycastHit[] hits = Physics.BoxCastAll(
             origin,
-            new Vector3(boundingBoxWidth, 1f, boundingBoxWidth) * 0.5f,
+            new Vector3(playerVariables.boundingBoxWidth, 1f, playerVariables.boundingBoxWidth) * 0.5f,
             Vector3.down,
             Quaternion.identity,
             checkDist,
@@ -444,7 +471,7 @@ public class PlayerMovement : MonoBehaviour
                 //bestDot = dot; //if looking for flattest instead of highest
                 distance = hit.distance;
                 minDistance = hit.distance;
-                if (dot >= cosMaxWalkableAngle)
+                if (dot >= playerVariables.cosMaxWalkableAngle)
                 {
                     groundNormal = hit.normal;
                     found = hit.collider.gameObject;
@@ -454,13 +481,14 @@ public class PlayerMovement : MonoBehaviour
 
         if (ground != null && waterLevel < 2 && found != null)
         {
-            ret = pos - Vector3.up * minDistance + Vector3.up * groundExtention;
+            ret = pos - Vector3.up * minDistance + Vector3.up * playerVariables.groundExtention;
         }
 
         ground = found;
         if (found != null) 
         {
             usedAirCrouches = 0;
+            usedMidAirJumps = 0;
         }
         return ret;
     }
@@ -580,11 +608,23 @@ public class PlayerMovement : MonoBehaviour
             hit.point = bestHit.point;
             hit.normal = -bestHit.normal;
             collidedObject = bestObject;
+            Debug.Log(hit.distance);
+            Debug.Log(hit.point);
+            Debug.Log(hit.normal);
+            Debug.Log(collidedObject);
+            Debug.Log(startPos);
+            Debug.Log(velocity);
             return bestDistance / wishdist;
         }
         else
         {
             hit.normal = Vector3.zero;
+            Debug.Log(hit.distance);
+            Debug.Log(hit.point);
+            Debug.Log(hit.normal);
+            Debug.Log(collidedObject);
+            Debug.Log(startPos);
+            Debug.Log(velocity);
             return 1f;
         }
     }
@@ -601,7 +641,7 @@ public class PlayerMovement : MonoBehaviour
         float completed = SweptTrace(startPos, wishpos, out hit, out dummyObject);
         if (completed >= 1.0f)
         {
-            return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) + surfaceExtention * hit.normal, (wishpos - startPos).normalized);
+            return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized);
         }
         Vector3 remove = Vector3.Project(velocity, hit.normal);
         if (Vector3.Dot(remove, hit.normal) < 0f)
@@ -616,7 +656,7 @@ public class PlayerMovement : MonoBehaviour
             float backCompleted = SweptTrace(startPos, wishpos, out backHit, out dummyObject); //this cannot be >= 1.0f, because then we wouldn't already be inside geometry
             if (backCompleted >= 1.0f) //not actually in geometry according to this check, shouldn't happen, also backHit.normal would be 0, so the surfaceextension would do nothing
             {
-                return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * backCompleted + surfaceExtention * backHit.normal, (wishpos - startPos).normalized);
+                return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * backCompleted + playerVariables.surfaceExtention * backHit.normal, (wishpos - startPos).normalized);
             }
             if (backCompleted == 0f) //completely stuck, cannot move, for some reason this happens a lot when it shouldn't
             {
@@ -624,7 +664,7 @@ public class PlayerMovement : MonoBehaviour
                 return startPos;
             }
             //move enough to just leave geometry to get unstuck,
-            return Move(depth - 1, timeLeft - (1.0f - backCompleted) * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * (1.0f - backCompleted) + surfaceExtention * backHit.normal, (wishpos - startPos).normalized));
+            return Move(depth - 1, timeLeft - (1.0f - backCompleted) * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * (1.0f - backCompleted) + playerVariables.surfaceExtention * backHit.normal, (wishpos - startPos).normalized));
         }
         else
         {
@@ -637,13 +677,13 @@ public class PlayerMovement : MonoBehaviour
             if (ground != null && waterLevel < 2)
             {
                 //Debug.Log(dummyObject);
-                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * minStepWidth;
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, playerVariables.maxStepHeight + playerVariables.groundExtention * 2f, 0f) - hit.normal * playerVariables.minStepWidth;
                 if (!UnsweptTrace(testPos)) //do not clip in walls
                 {
                     GameObject oldGround = ground;
                     Vector3 oldNormal = groundNormal;
-                    testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, maxStepHeight + groundExtention * 2f, 0f) - hit.normal * stepTeleDist;
-                    Vector3 stepped = GroundCheck(testPos, maxStepHeight + groundExtention * 3f); //stepped would ground us as we only check when grounded, this is the position we keep going
+                    testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, playerVariables.maxStepHeight + playerVariables.groundExtention * 2f, 0f) - hit.normal * playerVariables.stepTeleDist;
+                    Vector3 stepped = GroundCheck(testPos, playerVariables.maxStepHeight + playerVariables.groundExtention * 3f); //stepped would ground us as we only check when grounded, this is the position we keep going
                     if (ground == null || oldGround == ground)
                     {
                         ground = oldGround;
@@ -656,27 +696,27 @@ public class PlayerMovement : MonoBehaviour
                     }
                 }
             }
-            else if (waterLevel == 2 && velocity.y > 99f && jumpLockOut >= 3) //try jumping out of water
+            else if (waterLevel == 2 && velocity.y > 99f && jumpLockOut >= playerVariables.jumpLockOutLength) //try jumping out of water
             {
-                jumpLockOut = 3;
-                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, 100f, 0f) - hit.normal * minStepWidth;
+                jumpLockOut = playerVariables.jumpLockOutLength;
+                Vector3 testPos = startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized) + new Vector3(0f, 100f, 0f) - hit.normal * playerVariables.minStepWidth;
                 if (!UnsweptTrace(testPos)) //do not attempt to jump out of water, and into a wall
                 {
-                    velocity = velocity + new Vector3(hit.normal.x, 0f, hit.normal.z) * 40f + Vector3.up * jumpVelocity;
+                    velocity = velocity + new Vector3(hit.normal.x, 0f, hit.normal.z) * 40f + Vector3.up * playerVariables.jumpVelocity;
                 }
             }
         //}
 
-        return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + surfaceExtention * hit.normal, (wishpos - startPos).normalized));
+        return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized));
     }
 
     Vector3 playerBounds()
     {
         if (isCrouching)
         {
-            return new Vector3(boundingBoxWidth, duckingBoundingBoxHeight, boundingBoxWidth);
+            return new Vector3(playerVariables.boundingBoxWidth, playerVariables.duckingBoundingBoxHeight, playerVariables.boundingBoxWidth);
         }
-        return new Vector3(boundingBoxWidth, standingBoundingBoxHeight, boundingBoxWidth);
+        return new Vector3(playerVariables.boundingBoxWidth, playerVariables.standingBoundingBoxHeight, playerVariables.boundingBoxWidth);
     }
 
     Vector3 HandleCrouch(Vector3 pos)
@@ -689,15 +729,15 @@ public class PlayerMovement : MonoBehaviour
         if (crouchButtonState) {
             if (!isCrouching) {
                 if (ground == null) {
-                    if (usedAirCrouches < maxAirCrouches) {
+                    if (usedAirCrouches < playerVariables.maxAirCrouches) {
                         ret += new Vector3(0, 20, 0); //upshift to pull legs up instead of head down, this should make headbugs work, but unity doesn't check new collisions on this line, so I'll have to do it manually
                         Crouch(ref ret);
                     }
                 }
-                else if (currentCrouchFrame < crouchAnimLength && !isCrouching) { //make uncrouch anim fully finish
+                else if (currentCrouchFrame < playerVariables.crouchAnimLength && !isCrouching) { //make uncrouch anim fully finish
                     AnimateCrouch(ref ret);
                 }
-            } else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < crouchAnimLength) {
+            } else if (ground != null && currentCrouchFrame > 0 && currentCrouchFrame < playerVariables.crouchAnimLength) {
                 AnimateStand(ref ret);
             }
         } else {
@@ -714,10 +754,10 @@ public class PlayerMovement : MonoBehaviour
     }
 
     private bool Crouch(ref Vector3 pos) { //applies bounding box change on crouch
-        if (usedAirCrouches >= maxAirCrouches || isCrouching) return false;
+        if (usedAirCrouches >= playerVariables.maxAirCrouches || isCrouching) return false;
         ++usedAirCrouches;
         isCrouching = true;
-        currentCrouchFrame = crouchAnimLength; //set to full crouch to not animate crouching on landing
+        currentCrouchFrame = playerVariables.crouchAnimLength; //set to full crouch to not animate crouching on landing
 
         // shift collider down (unity scales to center, so by half of tf2's upshift, this also makes the camera stay in the correct spot)
         pos = pos + new Vector3(0f, -10f, 0f);
@@ -741,18 +781,22 @@ public class PlayerMovement : MonoBehaviour
     }
 
     private void AnimateCrouch(ref Vector3 pos) {
-        if (currentCrouchFrame < crouchAnimLength)
+        if (currentCrouchFrame < playerVariables.crouchAnimLength)
         {
             currentCrouchFrame++;
         }
-        if (currentCrouchFrame == crouchAnimLength)
+        if (currentCrouchFrame == playerVariables.crouchAnimLength)
         {
             Crouch(ref pos);
         }
     }
 
     private void AnimateStand(ref Vector3 pos) {
-        if (!CanStand(pos)) return;
+        if (!CanStand(pos)) {
+            isCrouching = true;
+            currentCrouchFrame = playerVariables.crouchAnimLength;
+            return;
+        }
         if (currentCrouchFrame > 0)
         {
             currentCrouchFrame--;

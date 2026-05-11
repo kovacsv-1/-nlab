@@ -2797,6 +2797,7 @@ GameObject:
   - component: {fileID: 880500160}
   - component: {fileID: 880500161}
   - component: {fileID: 880500159}
+  - component: {fileID: 880500162}
   m_Layer: 7
   m_Name: Player
   m_TagString: Untagged
@@ -2889,13 +2890,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 83261dbf62012794cba305036777df6f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
-  gravity: 800
-  bhopCap: 1.2
-  classSpeedMod: 0.8
-  hardSpeedCap: 1
-  groundAccel: 10
-  airAccel: 10
-  waterAccel: 10
+  playerVariables: {fileID: 11400000, guid: b5b180f35ccfcdd4383f7aa38a79c53f, type: 2}
   colliderMask:
     serializedVersion: 2
     m_Bits: 320
@@ -2905,8 +2900,7 @@ MonoBehaviour:
   triggerMask:
     serializedVersion: 2
     m_Bits: 512
-  crouchAnimLength: 10
-  waterBodies: []
+  classSpeedMod: 0.8
   autoBHop: 0
 --- !u!64 &880500159
 MeshCollider:
@@ -2954,6 +2948,19 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a6fd70450c9140a4c9de8806999832c1, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GJKClosest
+--- !u!114 &880500162
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 880500153}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4ead113729b35c045a5dbfc8d56f8f23, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InputHandling
+  movement: {fileID: 880500158}
 --- !u!1 &1022871946
 GameObject:
   m_ObjectHideFlags: 0

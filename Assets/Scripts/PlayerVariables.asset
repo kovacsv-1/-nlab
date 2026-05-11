@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7cc85ba4fbd213c4f8087140004f6015, type: 3}
+  m_Name: PlayerVariables
+  m_EditorClassIdentifier: Assembly-CSharp::MovementVariables
+  surfaceExtention: 0.03125
+  groundExtention: 0.705
+  groundingHeight: 2
+  maxVelocity: 3500
+  leaveVelocity: 250
+  cosMaxWalkableAngle: 0.7
+  maxStepHeight: 18
+  minStepWidth: 0.04
+  stepTeleDist: 0.04
+  gravity: 800
+  jumpVelocity: 289
+  bhopCap: 1.2
+  walkSpeed: 300
+  airSpeed: 30
+  friction: 4
+  waterFriction: 1
+  stopSpeed: 100
+  duckSpeedMod: 0.33333334
+  airCrouchScalesSpeed: 0
+  backSpeedMod: 0.9
+  swimSpeedMod: 0.8
+  classSpeedMod: 1
+  jumpLockOutLength: 3
+  groundAccel: 10
+  airAccel: 10
+  waterAccel: 10
+  maxAirCrouches: 2
+  crouchAnimLength: 6
+  hardSpeedCap: 1
+  boundingBoxWidth: 48
+  standingBoundingBoxHeight: 82
+  duckingBoundingBoxHeight: 62
+  oldDuckingBoundingBoxHeight: 55
+  midAirJumps: 0
+  midAirJumpSetsVertical: 1
+  midAirJumpSetsHorizontal: 1
+  minAimAssistDist: 200
+  maxAimAssistDist: 2000
+  forwardProjectileOffset: 23.5
+  standingUpwardProjectileOffset: -3
+  duckingUpwardProjectileOffset: 8
+  stockRightwardProjectileOffset: 15
+  cowManglerRightwardProjectileOffset: 8
+  originalRightwardProjectileOffset: 0
+  standingViewHeight: 68
+  duckingViewHeight: 45
