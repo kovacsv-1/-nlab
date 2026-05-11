@@ -32,8 +32,6 @@ public class PlayerMovement : MonoBehaviour
 
     private int waterLevel = 0;
 
-    public bool autoBHop = false;
-
     private bool jumpButtonPressed = false;
     private bool jumpButtonHeld = false;
     private bool crouchButtonHeld = false;
@@ -174,7 +172,7 @@ public class PlayerMovement : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if (jumpButtonPressed || autoBHop && jumpButtonHeld)
+        if (jumpButtonPressed || playerVariables.autoBHop && jumpButtonHeld && ground != null)
         {
             jumping = true;
         }

@@ -39,7 +39,7 @@ MonoBehaviour:
   airAccel: 10
   waterAccel: 10
   maxAirCrouches: 2
-  crouchAnimLength: 6
+  crouchAnimLength: 10
   hardSpeedCap: 1
   boundingBoxWidth: 48
   standingBoundingBoxHeight: 82
@@ -48,13 +48,11 @@ MonoBehaviour:
   midAirJumps: 0
   midAirJumpSetsVertical: 1
   midAirJumpSetsHorizontal: 1
+  autoBHop: 1
   minAimAssistDist: 200
   maxAimAssistDist: 2000
-  forwardProjectileOffset: 23.5
-  standingUpwardProjectileOffset: -3
-  duckingUpwardProjectileOffset: 8
-  stockRightwardProjectileOffset: 15
-  cowManglerRightwardProjectileOffset: 8
-  originalRightwardProjectileOffset: 0
+  standingProjectileOffset: {x: 23.5, y: -3, z: 15}
+  crouchingProjectileOffset: {x: 23.5, y: 8, z: 15}
+  leftHanded: 0
   standingViewHeight: 68
   duckingViewHeight: 45
