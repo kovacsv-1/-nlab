@@ -305,7 +305,7 @@ public class GJKClosest : MonoBehaviour
             {
                 ret.hit = false;
                 Debug.Log("E");
-                ret.distance = (x - playerPos).magnitude;
+                ret.distance = wishdist;
                 Debug.Log(ret.distance); //always 0???
                 return ret;
             }
@@ -332,7 +332,7 @@ public class GJKClosest : MonoBehaviour
             {
                 ret.hit = false;
                 Debug.Log("C");
-                Debug.Log(ret.distance); //always 0???
+                Debug.Log(ret.distance);
                 return ret;
             }
 
@@ -347,8 +347,9 @@ public class GJKClosest : MonoBehaviour
         }
         ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove).normal;
         //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
-        Debug.Log("D"); //only this happens, only see D and 0 on console, idk why
-        Debug.Log(ret.distance); //always 0???
+        Debug.Log("D");
+        ret.distance = wishdist;
+        Debug.Log(ret.distance);
         return ret;
     }
 

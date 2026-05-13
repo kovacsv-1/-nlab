@@ -513,11 +513,11 @@ public class PlayerMovement : MonoBehaviour
 
     Vector3 GetUnstuck(Vector3 pos)
     {
-        for (int i = -1; i < 2; ++i)
+        for (int i = -2; i < 3; ++i)
         {
-            for (int e = -1; e < 2; ++e)
+            for (int e = -2; e < 3; ++e)
             {
-                for (int f = -1; f < 2; ++f)
+                for (int f = -2; f < 3; ++f)
                 {
                     Vector3 testPos = new Vector3(pos.x + e, pos.y - i, pos.z + f); //check straight up first
                     if (!UnsweptTrace(testPos))
