@@ -7,6 +7,7 @@ public class ShootRocket : MonoBehaviour
     public Transform cam;
     public GameObject rocket;
     public GameObject player;
+    public PlayerMovement playerMovement;
     public float attackTime = 0.8f;
     private bool canFire = true;
 
@@ -14,9 +15,9 @@ public class ShootRocket : MonoBehaviour
     
     public LayerMask lockOn = 641; //enemy players, map geometry, projectiles shot by others, anything the player can collide with
 
-    void FixedUpdate() {
-        if (wantsToFire && canFire) StartCoroutine(fire());
-    }
+    //void FixedUpdate() {
+    //    if (wantsToFire && canFire) StartCoroutine(fire());
+    //}
 
     IEnumerator fire() {
         canFire = false;
@@ -33,17 +34,17 @@ public class ShootRocket : MonoBehaviour
             }
         }
         rs.setDir(dir);
-        Debug.Log(dir);
         player.GetComponent<AudioSource>().Play();
         //TODO: add the rocket to player's rockets to handle step from movement
+        playerMovement.AddRocket(newRocket);
         yield return new WaitForSeconds(attackTime);
         canFire = true;
     }
 
-    public void SetInputs(bool fire1)
-    {
-        wantsToFire = fire1;
-    }
+    //public void SetInputs(bool fire1)
+    //{
+    //    wantsToFire = fire1;
+    //}
 
     public void Shoot()
     {

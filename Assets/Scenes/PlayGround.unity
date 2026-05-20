@@ -2893,6 +2893,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerMovement
   playerVariables: {fileID: 11400000, guid: b5b180f35ccfcdd4383f7aa38a79c53f, type: 2}
+  shooter: {fileID: 880500163}
   colliderMask:
     serializedVersion: 2
     m_Bits: 320
@@ -2961,7 +2962,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::InputHandling
   movement: {fileID: 880500158}
-  firing: {fileID: 880500163}
 --- !u!114 &880500163
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2977,6 +2977,7 @@ MonoBehaviour:
   cam: {fileID: 460349662}
   rocket: {fileID: 3948387421706659568, guid: 28697f993415b53489d805a78aaad184, type: 3}
   player: {fileID: 880500153}
+  playerMovement: {fileID: 880500158}
   attackTime: 0.8
   lockOn:
     serializedVersion: 2

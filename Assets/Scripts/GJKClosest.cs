@@ -292,8 +292,8 @@ public class GJKClosest : MonoBehaviour
                 ret.normal = prev.normal.magnitude > 0 ? prev.normal : gjk.normal;
                 //ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, dir).normal;
                 ret.point = gjk.point;
-                Debug.Log("A");
-                Debug.Log(ret.distance); //always 0???
+                //Debug.Log("A");
+                //Debug.Log(ret.distance); //always 0???
                 return ret;
             }
             
@@ -304,9 +304,9 @@ public class GJKClosest : MonoBehaviour
             if (denom <= -EPSILON) //for some reason this case runs on the last frame I am outside of geometry, this gets me stuck somehow
             {
                 ret.hit = false;
-                Debug.Log("E");
+                //Debug.Log("E");
                 ret.distance = wishdist;
-                Debug.Log(ret.distance); //always 0???
+                //Debug.Log(ret.distance); //always 0???
                 return ret;
             }
 
@@ -318,8 +318,8 @@ public class GJKClosest : MonoBehaviour
                 ret.hit = false;
                 ret.distance = wishdist;
                 //this gets us stuck in slopes and on ground sometimes, idk how
-                Debug.Log("B");
-                Debug.Log(ret.distance);
+                //Debug.Log("B");
+                //Debug.Log(ret.distance);
                 return ret;
             }
             stepDist = Math.Max(0f, stepDist); //always have small margin, so we don't actually hit, and get bad separation
@@ -331,8 +331,8 @@ public class GJKClosest : MonoBehaviour
             if (remaining <= EPSILON)
             {
                 ret.hit = false;
-                Debug.Log("C");
-                Debug.Log(ret.distance);
+                //Debug.Log("C");
+                //Debug.Log(ret.distance);
                 return ret;
             }
 
@@ -347,9 +347,9 @@ public class GJKClosest : MonoBehaviour
         }
         ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove).normal;
         //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
-        Debug.Log("D");
+        //Debug.Log("D");
         ret.distance = wishdist;
-        Debug.Log(ret.distance);
+        //Debug.Log(ret.distance);
         return ret;
     }
 

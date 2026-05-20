@@ -117,6 +117,7 @@ MonoBehaviour:
     m_Bits: 65
   selfTransform: {fileID: 6282996295726150565}
   explosionEffect: {fileID: 4262997599068236158, guid: 4d7f2589cf080e34da1b2749b756e9c6, type: 3}
+  trailEffect: {fileID: 4262997599068236158, guid: 4dbd77f860e8fb74f9c1bfedc884d23d, type: 3}
   explosionRadius: 121
   baseDamage: 90
   falloff: 0.5

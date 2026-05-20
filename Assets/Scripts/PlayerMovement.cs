@@ -7,6 +7,7 @@ using UnityEngine;
 public class PlayerMovement : MonoBehaviour
 {
     public MovementVariables playerVariables;
+    public ShootRocket shooter;
 
     private Vector3 velocity = new Vector3(0f, 0f, 0f);
     private GameObject ground = null;
@@ -27,6 +28,7 @@ public class PlayerMovement : MonoBehaviour
     private int usedAirCrouches = 0;
     private int usedMidAirJumps = 0;
     private int jumpLockOut = 0;
+    private Dictionary<GameObject, RocketScript> rockets = new Dictionary<GameObject, RocketScript>();
 
     private float camY = 0f;
 
@@ -165,6 +167,12 @@ public class PlayerMovement : MonoBehaviour
         //transform.localScale = new Vector3(boundingBoxWidth, isCrouching ? duckingBoundingBoxHeight : standingBoundingBoxHeight, boundingBoxWidth);
 
         // 16. Shoot / detonate projectiles.
+        if (fire1ButtonHeld)
+        {
+            shooter.Shoot();
+        }
+        RemoveNullRockets();
+        StepRockets(newPos);
 
         jumping = false; //reset jump input, will be set to true again if the player presses the jump button before the next FixedUpdate
     }
@@ -606,23 +614,27 @@ public class PlayerMovement : MonoBehaviour
             hit.point = bestHit.point;
             hit.normal = -bestHit.normal;
             collidedObject = bestObject;
+            /*
             Debug.Log(hit.distance);
             Debug.Log(hit.point);
             Debug.Log(hit.normal);
             Debug.Log(collidedObject);
             Debug.Log(startPos);
             Debug.Log(velocity);
+            */
             return bestDistance / wishdist;
         }
         else
         {
             hit.normal = Vector3.zero;
+            /*
             Debug.Log(hit.distance);
             Debug.Log(hit.point);
             Debug.Log(hit.normal);
             Debug.Log(collidedObject);
             Debug.Log(startPos);
             Debug.Log(velocity);
+            */
             return 1f;
         }
     }
@@ -895,5 +907,38 @@ public class PlayerMovement : MonoBehaviour
         fire2ButtonHeld = fire2Held;
         horizontalInput = horizontal;
         verticalInput = vertical;
+    }
+
+    public void AddRocket(GameObject rocket)
+    {
+        rockets.Add(rocket, rocket.GetComponent<RocketScript>());
+    }
+
+    void RemoveNullRockets()
+    {
+        List<GameObject> keysToRemove = new List<GameObject>();
+        foreach (var kvp in rockets)
+        {
+            if (kvp.Key == null)
+            {
+                keysToRemove.Add(kvp.Key);
+            }
+        }
+        foreach (var key in keysToRemove)
+        {
+            rockets.Remove(key);
+        }
+    }
+
+    void StepRockets(Vector3 pos)
+    {
+        foreach (GameObject rocket in rockets.Keys)
+        {
+            RocketScript rocketScript;
+            if (rockets.TryGetValue(rocket, out rocketScript))
+            {
+                rocketScript.Step(pos);
+            }
+        }
     }
 }

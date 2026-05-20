@@ -13,6 +13,7 @@ public class RocketScript : MonoBehaviour
     public Transform selfTransform;
 
     public GameObject explosionEffect;
+    public GameObject trailEffect;
     public float explosionRadius = 121f;
     public float baseDamage = 90f;
     public float falloff = 0.5f;
@@ -39,65 +40,30 @@ public class RocketScript : MonoBehaviour
         selfTransform.position += upOffset * cam.up;
     }
 
-    public void Step()
+    public void Step(Vector3 playerPos)
     {
+        if (Physics.Raycast(
+            selfTransform.position, 
+            dir, 
+            out RaycastHit hit, 
+            rocketSpeed * Time.fixedDeltaTime, 
+            ~passThrough
+        ))
+        {
+            selfTransform.position += dir * hit.distance;
+            if (((1 << hit.collider.gameObject.layer) & noNade) == 0)
+            {
+                //Explode(playerPos);
+            }
+            Destroy(this.gameObject);
+            return;
+        }
+        selfTransform.position += dir * rocketSpeed * Time.fixedDeltaTime;
+        selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
         //raycast and use gjk stuff where possible
     }
 
-    void FixedUpdate()
-    {
-        selfTransform.position += dir * rocketSpeed * Time.fixedDeltaTime;
-        selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
-    }
-
-    /* rigidbody solution, absolutely wrong, probably won't use particles
-    void OnTriggerEnter(Collider other) {
-        if ((passThrough.value & (1 << other.gameObject.layer)) > 0) //bitwise and for each bit of the mask and the layer's number (this is how masks work) to check for if layer is masked
-            return;
-        if (!((noNade.value & (1 << other.gameObject.layer)) > 0)) {
-            Explode();
-        }
-        Destroy(this.gameObject);
-    }
-
-    void OnCollisionEnter(Collision other)
-    {
-        if (hasCollided) return;
-
-        if ((passThrough.value & (1 << other.gameObject.layer)) > 0) //bitwise and for each bit of the mask and the layer's number (this is how masks work) to check for if layer is masked
-            return;
-        
-        if (!((noNade.value & (1 << other.gameObject.layer)) > 0)) {
-            // Get collision data
-            ContactPoint contact = other.contacts[0];
-            collisionPoint = contact.point;
-            collisionNormal = contact.normal;
-            hasCollided = true;
-            
-            // Move rocket 1 HU away from surface
-            float moveDistance = 1f * owner.GetComponent<SimpleMovement>().HUToMeters;
-            transform.position = collisionPoint + collisionNormal * moveDistance;
-            
-            // Stop movement and explode
-            rb.linearVelocity = Vector3.zero;
-            Explode();
-        }
-
-        Destroy(this.gameObject);
-    }
-
-    public void setDir(Vector3 facing) {
-        dir = facing; //cam.forward in simplemovement
-        rb.linearVelocity = dir * rocketSpeed;
-    }
-
-    public void applyOffset(Transform cam) { //call when spawning
-        selfTransform.position += startOffset.x * cam.forward * HUToMeters; //I have to do this here because Start() runs AFTER this gets called for some reason
-        selfTransform.position += startOffset.y * cam.right * HUToMeters;
-        float upOffset = owner.GetComponent<SimpleMovement>().crouching ? crouchingUpOffset : startOffset.z;
-        selfTransform.position += upOffset * cam.up * HUToMeters;
-    }
-
+    /*
     void Explode()
     {
         // Adjust explosion position to be 1 HU away from wall
