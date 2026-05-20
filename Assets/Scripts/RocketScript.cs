@@ -29,6 +29,7 @@ public class RocketScript : MonoBehaviour
     public void setDir(Vector3 facing) {
         dir = facing; //cam.forward in movement
         //rb.linearVelocity = dir * rocketSpeed;
+        selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
     }
 
     public void applyOffset(Transform cam) { //call when spawning
@@ -41,6 +42,12 @@ public class RocketScript : MonoBehaviour
     public void Step()
     {
         //raycast and use gjk stuff where possible
+    }
+
+    void FixedUpdate()
+    {
+        selfTransform.position += dir * rocketSpeed * Time.fixedDeltaTime;
+        selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
     }
 
     /* rigidbody solution, absolutely wrong, probably won't use particles
