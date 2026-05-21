@@ -50,17 +50,35 @@ public class RocketScript : MonoBehaviour
             ~passThrough
         ))
         {
+            float traversed = hit.distance / (rocketSpeed * Time.fixedDeltaTime);
+            for (int i = 0; i * 0.25f < traversed; ++i)
+            {
+                Instantiate(trailEffect, selfTransform.position + traversed * dir * rocketSpeed * Time.fixedDeltaTime * (float)i * 0.25f, Quaternion.identity);
+            }
             selfTransform.position += dir * hit.distance;
             if (((1 << hit.collider.gameObject.layer) & noNade) == 0)
             {
-                //Explode(playerPos);
+                Explode(playerPos, hit.normal);
             }
             Destroy(this.gameObject);
             return;
         }
+        for (int i = 0; i < 4; ++i)
+        {
+            Instantiate(trailEffect, selfTransform.position + dir * rocketSpeed * Time.fixedDeltaTime * (float)i * 0.25f, Quaternion.identity);
+        }
         selfTransform.position += dir * rocketSpeed * Time.fixedDeltaTime;
         selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
-        //raycast and use gjk stuff where possible
+        //use gjk stuff where possible
+    }
+
+    void Explode(Vector3 playerPos, Vector3 hitNormal)
+    {
+        Vector3 explosionPosition = selfTransform.position - hitNormal;
+        Instantiate(explosionEffect, explosionPosition, Quaternion.identity);
+        //sphere overlap or gjksphereoverlap to get all possible players/enemies hit
+
+
     }
 
     /*

@@ -353,56 +353,6 @@ public class GJKClosest : MonoBehaviour
         return ret;
     }
 
-    public GJKHit ShapeCast(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove)
-    {
-        // 1. Generate world vertices of the player box
-        List<Vector3> playerVerts = new List<Vector3>(8);
-        Vector3 h = playerHalfExtents;
-        for (int x = -1; x <= 1; x += 2)
-            for (int y = -1; y <= 1; y += 2)
-                for (int z = -1; z <= 1; z += 2)
-                    playerVerts.Add(playerPos + new Vector3(x * h.x, y * h.y, z * h.z));
-
-        // 2. Get world vertices of the mesh (cache this if possible)
-        List<Vector3> meshVerts = new List<Vector3>();
-        Transform meshTransform = mesh.transform;
-        foreach (Vector3 v in mesh.sharedMesh.vertices)
-            meshVerts.Add(meshTransform.TransformPoint(v));
-
-        // 3. Cast
-        float hitDist;
-        Vector3 normal, pointOnB;
-        if (GJKDirCast.Cast(playerVerts, meshVerts, wishMove.normalized, out hitDist, out normal, out pointOnB))
-        {
-            GJKHit ret = new GJKHit();
-            float moveLen = wishMove.magnitude;
-            if (hitDist <= moveLen + EPSILON)
-            {
-                ret.hit = true;
-                ret.distance = Mathf.Min(hitDist, moveLen);
-                ret.normal = normal;
-                ret.point = pointOnB;
-                // Closest points can be approximated if needed
-                ret.closestA = playerPos + wishMove.normalized * ret.distance; // player at contact
-                ret.closestB = pointOnB;
-            }
-            else
-            {
-                ret.hit = false;
-                ret.distance = moveLen;
-            }
-            return ret;
-        }
-        else
-        {
-            // No hit found within the ray – can move full distance
-            GJKHit ret = new GJKHit();
-            ret.hit = false;
-            ret.distance = wishMove.magnitude;
-            return ret;
-        }
-    }
-
     //simplex cases
     SimplexSolve PointSimplex(ref ComplexSimplex simplex)
     {
