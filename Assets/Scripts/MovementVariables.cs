@@ -60,6 +60,10 @@ public class MovementVariables : ScriptableObject
     public Vector3 standingProjectileOffset = new Vector3(23.5f, -3f, 15f);
     public Vector3 crouchingProjectileOffset = new Vector3(23.5f, 8f, 15f);
     public bool leftHanded = false;
+    public float knockbackMod = 10f; //9 for demo
+    public float knockbackGroundMod = 5f; //9 for demo
+    public float selfDamageMod = 1f; //0.75f for demo
+    public float selfDamageAirMod = 0.6f; //0.75f for demo
 
     public float standingViewHeight = 68f; // 65 for scout, 75 for heavy and support classes
     public float duckingViewHeight = 45f;

@@ -720,7 +720,7 @@ public class PlayerMovement : MonoBehaviour
         return Move(depth - 1, timeLeft - completed * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * completed + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized));
     }
 
-    Vector3 playerBounds()
+    public Vector3 playerBounds()
     {
         if (isCrouching)
         {
@@ -940,5 +940,57 @@ public class PlayerMovement : MonoBehaviour
                 rocketScript.Step(pos);
             }
         }
+    }
+
+    public void TakeDamage(float damage, Vector3 origin, GameObject source, Vector3 timedPos)
+    {
+        Vector3 knockBackOrigin = origin - Vector3.up * 10f;
+        float takenDamage = damage;
+        if (source == this.gameObject)
+        {
+            if (ground == null && waterLevel == 0)
+            {
+                takenDamage = damage * playerVariables.selfDamageAirMod; //(tf_damagescale_self_soldier = 5, regular is 10, and demo is 9 for both air and ground)
+            }
+            else
+            {
+                takenDamage = damage * playerVariables.selfDamageMod; //10 for everyone except demo is 9
+            }
+        }
+        TakeKnockback((timedPos - knockBackOrigin).normalized, takenDamage);
+    }
+
+    public void TakeDamage(float damage, Vector3 origin, GameObject source) //this is when not self damage, so newpos isn't passed, still double checking redundancy
+    {
+        Vector3 knockBackOrigin = origin - Vector3.up * 10f;
+        float takenDamage = damage;
+        if (source == this.gameObject)
+        {
+            if (ground == null && waterLevel == 0)
+            {
+                takenDamage = damage * playerVariables.selfDamageAirMod; //(tf_damagescale_self_soldier = 5, regular is 10, and demo is 9 for both air and ground)
+            }
+            else
+            {
+                takenDamage = damage * playerVariables.selfDamageMod; //10 for everyone except demo is 9
+            }
+        }
+        //TODO: actually handle damage and health
+        TakeKnockback((transform.position - knockBackOrigin).normalized, takenDamage);
+    }
+
+    public void TakeKnockback(Vector3 direction, float damage) //always assume damage is from 10 units lower than reality
+    {
+        float knockbackMod = 10f;
+        float mass = isCrouching ? playerVariables.oldDuckingBoundingBoxHeight / playerVariables.standingBoundingBoxHeight : playerVariables.standingBoundingBoxHeight / playerVariables.standingBoundingBoxHeight; //again, tf2 does this because of "air resistance and surface size"
+        if (ground == null || waterLevel > 0)
+        {
+            knockbackMod = playerVariables.knockbackMod;
+        }
+        else
+        { 
+            knockbackMod = playerVariables.knockbackGroundMod;
+        }
+        velocity = velocity + direction * Mathf.Min((knockbackMod * damage)/mass, 1000f);
     }
 }

@@ -14,8 +14,8 @@ public class RocketScript : MonoBehaviour
 
     public GameObject explosionEffect;
     public GameObject trailEffect;
-    public float explosionRadius = 121f;
-    public float baseDamage = 90f;
+    public float explosionRadius = 121f; //grenades 146, stickies 146, charged cow mangler 160.93 (1.33 * normal), but it slowes you down to 80 units/s when charging
+    public float baseDamage = 90f; //100 for grenades, 120 for stickies
     public float falloff = 0.5f;
     public GameObject owner;
     public Vector3 startOffset = new Vector3(23.5f, 0f, -3f); //(forward, right, up) for the original, for others see https://www.youtube.com/watch?v=UFtZMIWt0WI
@@ -28,8 +28,7 @@ public class RocketScript : MonoBehaviour
     private bool hasCollided = false;
 
     public void setDir(Vector3 facing) {
-        dir = facing; //cam.forward in movement
-        //rb.linearVelocity = dir * rocketSpeed;
+        dir = facing;
         selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
     }
 
@@ -69,112 +68,64 @@ public class RocketScript : MonoBehaviour
         }
         selfTransform.position += dir * rocketSpeed * Time.fixedDeltaTime;
         selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
-        //use gjk stuff where possible
     }
 
-    void Explode(Vector3 playerPos, Vector3 hitNormal)
+    void Explode(Vector3 playerPos, Vector3 hitNormal) //only doing self damage for now, regular should have rampup and falloff based on distance to owner as well, and collect enemies with a spherecast which gets recalculated like the damage is calculated here
     {
         Vector3 explosionPosition = selfTransform.position - hitNormal;
         Instantiate(explosionEffect, explosionPosition, Quaternion.identity);
-        //sphere overlap or gjksphereoverlap to get all possible players/enemies hit
 
+        Vector3 playerBottom = playerPos - playerMovement.playerBounds().y * Vector3.up / 2f;
 
-    }
-
-    /*
-    void Explode()
-    {
-        // Adjust explosion position to be 1 HU away from wall
-        Vector3 explosionPosition = transform.position;
-        
-        // Create explosion effect at corrected position
-        Instantiate(explosionEffect, explosionPosition, Quaternion.identity);
-        
-        // Get player reference
-        GameObject player = GameObject.FindGameObjectWithTag("Player"); //replace this with a sphere collider at some point
-        if (!player) return;
-        
-        // Calculate both possible damage points
-        BoxCollider playerCollider = player.GetComponent<BoxCollider>();
-        Vector3 playerCenter = player.transform.position + playerCollider.center;
-        Vector3 playerBottom = playerCenter  - new Vector3(0, playerCollider.size.y/2, 0);
-        
-        // Get closest point to explosion
-        float distanceToCenter = Vector3.Distance(explosionPosition, playerCenter);
+        float distanceToCenter = Vector3.Distance(explosionPosition, playerPos);
         float distanceToBottom = Vector3.Distance(explosionPosition, playerBottom);
-        Vector3 playerPos = distanceToBottom < distanceToCenter ? playerBottom : playerCenter;
-        
-        // Line of sight check from corrected position
-        if (!HasLineOfSight(explosionPosition, playerPos))
-            return;
-        
-        // Only affect owner
-        if (player == owner)
+        Vector3 calcPos = distanceToBottom < distanceToCenter ? playerBottom : playerPos;
+
+        if (HasLineOfSight(explosionPosition, playerPos))
         {
-            CalculateSelfDamage(player, Vector3.Distance(explosionPosition, playerPos)); //distanceToBottom //this may or may not be calculated to middle bottom of bounding box (I don't think it is, but it is weird (it likely is))
+            float damage = CalculateDamage(Vector3.Distance(explosionPosition, playerPos));
+            playerMovement.TakeDamage(damage, explosionPosition, owner, playerPos);
         }
-    }
 
-    void CalculateSelfDamage(GameObject player, float distance)
-    {
-        playerMovement = player.GetComponent<SimpleMovement>();
-        if (!playerMovement) return;
-
-        float damage = CalculateDamage(distance);
-        
-        BoxCollider playerCollider = player.GetComponent<BoxCollider>();
-        Vector3 playerPos = player.transform.position + playerCollider.center; // - new Vector3(0, playerCollider.size.y/2, 0);
-
-        Vector3 knockback = CalculateKnockback(playerPos, damage); //this is calculated to feet position
-        
-        playerMovement.AddVelocity(knockback);
-        // Apply damage to player health here
-    }
-
-    float CalculateDamage(float distance)
-    {
-        if (distance > explosionRadius * HUToMeters) return 0; //to be safe
-        // TF2's damage falloff formula
-        float distanceFactor = Mathf.Clamp01(distance / (explosionRadius * HUToMeters)); //* HUToMeters as shooting a wall too close would make this run before Start()...
-        float damage = baseDamage * (1 - (1 - falloff) * distanceFactor);
-        
-        // Apply air resistance (tf_damagescale_self_soldier)
-        if (!playerMovement.isGrounded && playerMovement.waterLevel == 0)
-        {
-            damage *= 0.6f;
-        }
-        
-        return damage;
-    }
-
-    Vector3 CalculateKnockback(Vector3 playerPosition, float damage)
-    {
-        // Volume multiplier (TF2 crouching multiplier)
-        float volumeMultiplier = playerMovement.crouching ? 1.4909f : 1f;
-        
-        // Scale factor (ground vs air)
-        float scale = playerMovement.isGrounded ? 5f : 10f;
-        
-        // Force magnitude calculation
-        float forceMagnitude = Mathf.Min(1000f, damage * volumeMultiplier * scale);
-        
-        // Direction calculation (from 10 HU below rocket)
-        Vector3 forceOrigin = transform.position - Vector3.up * (10f * HUToMeters);
-        Vector3 forceDir = (playerPosition - forceOrigin).normalized;
-
-        return forceDir * forceMagnitude * HUToMeters;
+        //gather all objects on layer of enemy players and do this calculation for all with their positions and bounds instead of a passed position value
     }
 
     bool HasLineOfSight(Vector3 explosionPoint, Vector3 playerPos)
     {
-        if (owner.GetComponent<BoxCollider>().bounds.Contains(explosionPoint)) return true;
+        if (PointInsidePlayer(explosionPoint, playerPos)) return true;
         // Check both possible damage points
         RaycastHit hit;
-        Vector3 point = owner.GetComponent<BoxCollider>().ClosestPoint(explosionPoint);
+        Vector3 point = PointOnPlayer(explosionPoint, playerPos);
         float distance = Vector3.Distance(explosionPoint, point);
-        
+
         // Cast ray to center point
-        return (!Physics.Raycast(explosionPoint, (point - explosionPoint).normalized, out hit, distance, blockSplash));
+        return !Physics.Raycast(explosionPoint, (point - explosionPoint).normalized, out hit, distance, blockSplash); //only geometry can block splash damage, not players, so don't need to check if the player would block his own self-damage
     }
-    */
+
+    bool PointInsidePlayer(Vector3 point, Vector3 playerPos)
+    {
+        Vector3 playerBound = playerMovement.playerBounds();
+        if (point.x < playerPos.x - playerBound.x / 2 || point.x > playerPos.x + playerBound.x / 2) return false;
+        if (point.y < playerPos.y - playerBound.y / 2 || point.y > playerPos.y + playerBound.y / 2) return false;
+        if (point.z < playerPos.z - playerBound.z / 2 || point.z > playerPos.z + playerBound.z / 2) return false;
+        return true;
+    }
+
+    Vector3 PointOnPlayer(Vector3 point, Vector3 playerPos)
+    {
+        Vector3 playerBound = playerMovement.playerBounds();
+        float x = Mathf.Clamp(point.x, playerPos.x - playerBound.x / 2, playerPos.x + playerBound.x / 2);
+        float y = Mathf.Clamp(point.y, playerPos.y - playerBound.y / 2, playerPos.y + playerBound.y / 2);
+        float z = Mathf.Clamp(point.z, playerPos.z - playerBound.z / 2, playerPos.z + playerBound.z / 2);
+        return new Vector3(x, y, z);
+    }
+
+    float CalculateDamage(float distance)
+    {
+        if (distance > explosionRadius) return 0; //to be safe
+        // TF2's damage falloff formula for explosions, there is a regular damage falloff with the explosion point and playerpos distance when calculating damage to others, and then this still applies
+        float damage = baseDamage * (1f - (0.5f * Mathf.Min(distance / explosionRadius, 1f))); //baseDamage should be influenced by rampup and falloff (the other falloff)
+        
+        return damage;
+    }
 }
