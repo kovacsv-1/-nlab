@@ -42,24 +42,7 @@ public class MovementVariables : ScriptableObject
     public int midAirJumpSetsVertical = 1; //0 midair jump just adds jumpvel to y; 1 it sets y to jumpvel; 2 it sets it if y <= 0 otherwise adds
     public int midAirJumpSetsHorizontal = 1; //0 midair jump doesn't overwrite airaccel; 1 it sets current horizontal speed towards wishdir at wishspeed; 2 it sets it if dot product of current and wishspeed is negative otherwise adds to it
     public bool autoBHop = false;
-
-    //idk, dude, this game is weird: https://www.youtube.com/watch?v=AUPBC5W1KHo
-    public float minAimAssistDist = 200f;
-    public float maxAimAssistDist = 2000f;
-    //projectile spawning location offsets from camera when firing
-    /*
-    public float forwardProjectileOffset = 23.5f;
-
-    public float standingUpwardProjectileOffset = -3f;
-    public float duckingUpwardProjectileOffset = 8f;
-
-    public float stockRightwardProjectileOffset = 15f;
-    public float cowManglerRightwardProjectileOffset = 8f; 
-    public float originalRightwardProjectileOffset = 0f;
-    */
-    public Vector3 standingProjectileOffset = new Vector3(23.5f, -3f, 15f);
-    public Vector3 crouchingProjectileOffset = new Vector3(23.5f, 8f, 15f);
-    public bool leftHanded = false;
+ 
     public float knockbackMod = 10f; //9 for demo
     public float knockbackGroundMod = 5f; //9 for demo
     public float selfDamageMod = 1f; //0.75f for demo

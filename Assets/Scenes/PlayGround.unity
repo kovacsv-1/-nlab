@@ -2978,6 +2978,7 @@ MonoBehaviour:
   rocket: {fileID: 3948387421706659568, guid: 28697f993415b53489d805a78aaad184, type: 3}
   player: {fileID: 880500153}
   playerMovement: {fileID: 880500158}
+  rocketVariables: {fileID: 11400000, guid: 2152c164af18ece4ab5dcc7c47dd3bdd, type: 2}
   attackTime: 0.8
   lockOn:
     serializedVersion: 2

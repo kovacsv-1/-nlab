@@ -2,10 +2,8 @@ using UnityEngine;
 
 public class RocketScript : MonoBehaviour
 {
-
+    private float rocketSpeed = 1100f;
     public Vector3 dir;
-
-    public float rocketSpeed = 1100f;
 
     public LayerMask passThrough;
     public LayerMask noNade;
@@ -18,8 +16,6 @@ public class RocketScript : MonoBehaviour
     public float baseDamage = 90f; //100 for grenades, 120 for stickies
     public float falloff = 0.5f;
     public GameObject owner;
-    public Vector3 startOffset = new Vector3(23.5f, 0f, -3f); //(forward, right, up) for the original, for others see https://www.youtube.com/watch?v=UFtZMIWt0WI
-    public float crouchingUpOffset = 8f;
     
     public PlayerMovement playerMovement;
 
@@ -32,11 +28,8 @@ public class RocketScript : MonoBehaviour
         selfTransform.rotation = Quaternion.LookRotation(dir) * Quaternion.Euler(90f, 0f, 0f);
     }
 
-    public void applyOffset(Transform cam) { //call when spawning
-        selfTransform.position += startOffset.x * cam.forward; //I have to do this here because Start() runs AFTER this gets called for some reason
-        selfTransform.position += startOffset.y * cam.right;
-        float upOffset = owner.GetComponent<PlayerMovement>().GetCrouching() ? crouchingUpOffset : startOffset.z;
-        selfTransform.position += upOffset * cam.up;
+    public void applyOffset(Vector3 offset) { //call when spawning
+        selfTransform.position += offset;
     }
 
     public void Step(Vector3 playerPos)
@@ -127,5 +120,10 @@ public class RocketScript : MonoBehaviour
         float damage = baseDamage * (1f - (0.5f * Mathf.Min(distance / explosionRadius, 1f))); //baseDamage should be influenced by rampup and falloff (the other falloff)
         
         return damage;
+    }
+    
+    public void SetRocketSpeed(float rs)
+    {
+        rocketSpeed = rs;
     }
 }
