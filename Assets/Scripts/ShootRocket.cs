@@ -12,8 +12,6 @@ public class ShootRocket : MonoBehaviour
     public RocketVariables rocketVariables;
     public float attackTime = 0.8f;
     private bool canFire = true;
-
-    private bool wantsToFire = false;
     
     public LayerMask lockOn = 641; //enemy players, map geometry, projectiles shot by others, anything the player can collide with
 

@@ -21,7 +21,6 @@ public class RocketScript : MonoBehaviour
 
     private Vector3 collisionPoint;
     private Vector3 collisionNormal;
-    private bool hasCollided = false;
 
     public void setDir(Vector3 facing) {
         dir = facing;
