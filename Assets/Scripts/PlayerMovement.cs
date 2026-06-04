@@ -238,7 +238,8 @@ public class PlayerMovement : MonoBehaviour
         CapSpeed(playerVariables.walkSpeed * playerVariables.classSpeedMod * playerVariables.bhopCap);
 
         if (Vector3.Dot(groundNormal, Vector3.up) < 1f)
-        {   //so we don't jump towards the slope every time we jump
+        {   
+            //so we don't jump towards the slope every time we jump
             velocity = velocity + (playerVariables.gravity * 0.5f * Time.fixedDeltaTime) * groundNormal;
             velocity = new Vector3(velocity.x, 0f, velocity.z);
             velocity = velocity - (playerVariables.gravity * 0.5f * Time.fixedDeltaTime) * Vector3.up;
