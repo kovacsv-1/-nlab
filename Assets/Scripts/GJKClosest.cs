@@ -33,7 +33,7 @@ public class GJKClosest : MonoBehaviour
         public Vector3 dir;
     }
 
-    class ComplexSimplex {  //could just be a matrix
+    public class ComplexSimplex {  //could just be a matrix
         public Vector3 a; public Vector3 a1; public Vector3 a2;
         public Vector3 b; public Vector3 b1; public Vector3 b2;
         public Vector3 c; public Vector3 c1; public Vector3 c2;
@@ -61,46 +61,15 @@ public class GJKClosest : MonoBehaviour
         }
     }
 
-    Vector3 SupportPlayerBox(Vector3 direction, Vector3 halfExtents) //bounds of axis-aligned bounding box, support to find the best vertex, doesn't take playertransform, just around 000; might replace wiht player meshcollider, so it works with other shapes
-    {
-        return new Vector3(
-            direction.x >= 0 ? halfExtents.x : -halfExtents.x, //avoid centre of edges being returned as vertices
-            direction.y >= 0 ? halfExtents.y : -halfExtents.y,
-            direction.z >= 0 ? halfExtents.z : -halfExtents.z
-        );
-    }
-
-    Vector3 SupportMesh(Vector3 direction, MeshCollider meshCollider) //bounds of mesh collider, returns world-space vertices
-    {
-        Transform meshTransform = meshCollider.transform;
-        Mesh mesh = meshCollider.sharedMesh;
-        Vector3[] vertices = mesh.vertices; // local space
-
-        float bestDot = float.NegativeInfinity;
-        Vector3 bestVertex = Vector3.zero;
-
-        foreach (Vector3 localVertex in vertices)
-        {
-            Vector3 worldVertex = meshTransform.TransformPoint(localVertex);
-            float dot = Vector3.Dot(direction, worldVertex);
-            if (dot > bestDot)
-            {
-                bestDot = dot;
-                bestVertex = worldVertex;
-            }
-        }
-        return bestVertex;
-    }
-
     // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely, this has some shapecast logic it returns, but shouldn't be used for that
-    public GJKHit GJKComplex(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove) { //bool, ComplexSimplex, Vector3, Vector3 is what this should return
+    public GJKHit GJKComplex(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove, out ComplexSimplex bestSimplex) { //bool, ComplexSimplex, Vector3, Vector3 is what this should return
         ComplexSimplex simplex = new ComplexSimplex();
         Vector3 direction = wishMove.normalized;
-        simplex.a1 = SupportPlayerBox(-direction, playerHalfExtents) + playerPos;
-        simplex.a2 = SupportMesh(direction, mesh);
+        simplex.a1 = GJKSupport.PlayerBox(-direction, playerHalfExtents) + playerPos;
+        simplex.a2 = GJKSupport.Mesh(direction, mesh);
         simplex.a = simplex.a2 - simplex.a1;
         simplex.count = 1;
-        ComplexSimplex bestSimplex = new ComplexSimplex();
+        bestSimplex = new ComplexSimplex();
         float bestSupportDifference = 0f;
         Vector3 bestP = Vector3.zero;
         Vector3 bestDir = Vector3.zero;
@@ -183,8 +152,8 @@ public class GJKClosest : MonoBehaviour
                 return ret;
             }
 
-            Vector3 support1 = SupportPlayerBox(-p_dir.dir, playerHalfExtents) + playerPos;
-            Vector3 support2 = SupportMesh(p_dir.dir, mesh);;
+            Vector3 support1 = GJKSupport.PlayerBox(-p_dir.dir, playerHalfExtents) + playerPos;
+            Vector3 support2 = GJKSupport.Mesh(p_dir.dir, mesh);;
             Vector3 support = support2 - support1;
 
             // if p is more than or equivalently extremal in the direction of the origin, we can't find a better support point
@@ -277,9 +246,11 @@ public class GJKClosest : MonoBehaviour
         GJKHit ret = new GJKHit();
         GJKHit prev = new GJKHit();
 
+        ComplexSimplex cs;
+
         for (int step = 0; step < 40; step++)
         {
-            GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, dir); //just direction for wishmove, doesn't take distance
+            GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, dir, out cs); //just direction for wishmove, doesn't take distance
             // overlap
             if (gjk.hit || gjk.distance < EPSILON)
             {
@@ -345,7 +316,7 @@ public class GJKClosest : MonoBehaviour
         {
             ret.distance -= EPSILON;
         }
-        ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove).normal;
+        ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove, out cs).normal;
         //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
         //Debug.Log("D");
         ret.distance = wishdist;
@@ -720,5 +691,34 @@ public class GJKClosest : MonoBehaviour
         ret.y = a.y + barycentric * (b.y - a.y);
         ret.z = a.z + barycentric * (b.z - a.z);
         return ret;
+    }
+
+    public bool ComputeMTV(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, out Vector3 mtv)
+    {
+        mtv = Vector3.zero;
+
+        ComplexSimplex simplex;
+        GJKHit gjk = GJKComplex(mesh, playerHalfExtents, playerPos, Vector3.one, out simplex);
+
+        if (!gjk.hit || simplex.count < 4) return false;
+
+        // Support delegate-ek: a mesh support-ja közvetlenül a MeshCollider-t kapja,
+        // a player support-ja a playerPos-szal eltolt doboz.
+        System.Func<Vector3, Vector3> supportA =
+            dir => playerPos + GJKSupport.PlayerBox(-dir, playerHalfExtents);
+        System.Func<Vector3, Vector3> supportB =
+            dir => GJKSupport.Mesh(dir, mesh);
+
+        Vector3[] cso = { simplex.a, simplex.b, simplex.c, simplex.d };
+        Vector3[] ptA = { simplex.a1, simplex.b1, simplex.c1, simplex.d1 };
+        Vector3[] ptB = { simplex.a2, simplex.b2, simplex.c2, simplex.d2 };
+
+        EPAResult epa = EPA.Compute(cso, ptA, ptB, supportA, supportB);
+        if (!epa.valid) return false;
+
+        // CSO = mesh - player.  A player +mtv eltolása a CSO-t -mtv-vel tolja,
+        // ami pont a `normal * depth` mértékű szétválasztás.
+        mtv = epa.depth * epa.normal;
+        return true;
     }
 }
