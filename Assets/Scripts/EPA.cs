@@ -1,164 +1,243 @@
 using UnityEngine;
+using System;
 using System.Collections.Generic;
 
 public struct EPAResult
 {
     public bool valid;
-    public Vector3 normal;   // CSO-tér: origóból a legközelebbi határpont felé (egységvektor)
-    public float depth;      // penetrációs mélység
-    public Vector3 pointA;   // legközelebbi pont a playeren (world)
-    public Vector3 pointB;   // legközelebbi pont a meshen (world)
+    public Vector3 normal;   // CSO space: from origin to the closest boundary point (unit). Equals the surface normal facing the player.
+    public float depth;      // penetration depth
+    public Vector3 pointA;   // closest point on the player (world)
+    public Vector3 pointB;   // closest point on the mesh (world)
 }
 
-// Expanding Polytope Algorithm
-// Teljesen független a GJK-tól: 4 CSO pontot és két support delegate-et kap.
-// A CSO konvenció: cso = supportB - supportA  (mesh - player).
+// Expanding Polytope Algorithm.
+// CSO convention: cso = B - A   (mesh - player).
+//
+// supportA(dir) / supportB(dir) are PLAIN supports: "furthest point of the shape in direction dir".
+// The EPA itself takes care of the sign flip for A (CSO support in dir n = supportB(n) - supportA(-n)).
+// (The old code passed a delegate that negated the direction too, so the sign was flipped twice.)
 public static class EPA
 {
     const int   MAX_ITER = 64;
-    const float TOL      = 1e-4f;
-    const float EPS      = 1e-7f;
+    const float TOL      = 1e-3f;   // 1e-4 was below float noise at world coordinates of 100+
+    const float EPS      = 1e-6f;
 
-    // csoPts: 4 kezdeti CSO pont (a GJK záró szimplexe), tartalmazza az origót
-    // worldA: a hozzájuk tartozó player world pontok
-    // worldB: a hozzájuk tartozó mesh world pontok
-    // supportA(dir): player support egy adott irányban (world)
-    // supportB(dir): mesh support egy adott irányban (world)
+    struct Face
+    {
+        public int a, b, c;
+        public Vector3 n;   // outward unit normal
+        public float d;     // distance from origin along n
+    }
+
     public static EPAResult Compute(
         Vector3[] csoPts,
         Vector3[] worldA,
         Vector3[] worldB,
-        System.Func<Vector3, Vector3> supportA,
-        System.Func<Vector3, Vector3> supportB)
+        Func<Vector3, Vector3> supportA,
+        Func<Vector3, Vector3> supportB)
     {
         EPAResult result = new EPAResult();
-        result.valid = false;
+        if (csoPts == null) return result;
 
-        if (csoPts == null || csoPts.Length < 4) return result;
+        List<Vector3> pts = new List<Vector3>(16);
+        List<Vector3> ptA = new List<Vector3>(16);
+        List<Vector3> ptB = new List<Vector3>(16);
 
-        // Munka listák (bővíthetők)
-        List<Vector3> pts  = new List<Vector3>(csoPts);
-        List<Vector3> ptA  = new List<Vector3>(worldA);
-        List<Vector3> ptB  = new List<Vector3>(worldB);
+        // 1. keep only affinely independent input points (GJK may end with a 1-3 point simplex when touching)
+        for (int i = 0; i < csoPts.Length; ++i)
+        {
+            if (Independent(pts, csoPts[i]))
+            {
+                pts.Add(csoPts[i]); ptA.Add(worldA[i]); ptB.Add(worldB[i]);
+            }
+        }
 
-        // Degenerált tetraéder ellenőrzés
-        Vector3 ab = pts[1] - pts[0];
-        Vector3 ac = pts[2] - pts[0];
-        Vector3 ad = pts[3] - pts[0];
-        if (Mathf.Abs(Vector3.Dot(Vector3.Cross(ab, ac), ad)) < EPS)
-            return result;
+        // 2. complete to a tetrahedron with extra support points
+        if (!CompleteTetrahedron(pts, ptA, ptB, supportA, supportB)) return result;
 
-        // Kezdeti 4 lap
-        List<int[]> faces = new List<int[]>(4);
-        AddFace(pts, faces, 0, 1, 2);
-        AddFace(pts, faces, 0, 1, 3);
-        AddFace(pts, faces, 0, 2, 3);
-        AddFace(pts, faces, 1, 2, 3);
+        // Interior reference point used to orient faces. The origin can lie ON the boundary,
+        // so the centroid is used instead of the origin.
+        Vector3 interior = (pts[0] + pts[1] + pts[2] + pts[3]) * 0.25f;
+
+        List<Face> faces = new List<Face>(64);
+        AddFace(pts, faces, 0, 1, 2, interior);
+        AddFace(pts, faces, 0, 1, 3, interior);
+        AddFace(pts, faces, 0, 2, 3, interior);
+        AddFace(pts, faces, 1, 2, 3, interior);
+
+        int closestIdx = -1;
 
         for (int iter = 0; iter < MAX_ITER; ++iter)
         {
-            // 1. Legközelebbi lap az origóhoz
-            int     closestIdx    = -1;
-            float   closestDist   = float.PositiveInfinity;
-            Vector3 closestNormal = Vector3.zero;
-
+            // closest face to the origin
+            closestIdx = -1;
+            float closestDist = float.PositiveInfinity;
             for (int i = 0; i < faces.Count; ++i)
             {
-                Vector3 A = pts[faces[i][0]];
-                Vector3 B = pts[faces[i][1]];
-                Vector3 C = pts[faces[i][2]];
-                Vector3 nrm = Vector3.Cross(B - A, C - A);
-                float len = nrm.magnitude;
-                if (len < EPS) continue;
-                nrm /= len;
-                float d = Vector3.Dot(nrm, A);
-                if (d < 0f) { nrm = -nrm; d = -d; }  // kifelé nézzen
-                if (d < closestDist)
-                {
-                    closestDist   = d;
-                    closestIdx    = i;
-                    closestNormal = nrm;
-                }
+                if (faces[i].d < closestDist) { closestDist = faces[i].d; closestIdx = i; }
             }
             if (closestIdx < 0) return result;
 
-            // 2. Support a lap normálisa irányában
-            Vector3 supportA_ = supportA(-closestNormal);
-            Vector3 supportB_ = supportB( closestNormal);
-            Vector3 support   = supportB_ - supportA_;
-            float dSupport    = Vector3.Dot(support, closestNormal);
+            Face cf = faces[closestIdx];
 
-            // 3. Konvergencia
-            if (dSupport - closestDist < TOL)
-            {
-                result.valid  = true;
-                result.normal = closestNormal;
-                result.depth  = closestDist;
+            // support in the face normal direction
+            Vector3 sA = supportA(-cf.n);
+            Vector3 sB = supportB(cf.n);
+            Vector3 sup = sB - sA;
+            float dSup = Vector3.Dot(sup, cf.n);
 
-                int[] f = faces[closestIdx];
-                Vector3 A = pts[f[0]], B = pts[f[1]], C = pts[f[2]];
-                Vector3 pOnFace = closestNormal * closestDist;
-                Vector3 bary = Barycentric(A, B, C, pOnFace);
+            // converged
+            if (dSup - cf.d < TOL) return Finish(faces[closestIdx], pts, ptA, ptB);
 
-                result.pointA = bary.x * ptA[f[0]] + bary.y * ptA[f[1]] + bary.z * ptA[f[2]];
-                result.pointB = bary.x * ptB[f[0]] + bary.y * ptB[f[1]] + bary.z * ptB[f[2]];
-                return result;
-            }
-
-            // 4. Polytope bővítése
             int newIdx = pts.Count;
-            pts.Add(support);
-            ptA.Add(supportA_);
-            ptB.Add(supportB_);
+            pts.Add(sup); ptA.Add(sA); ptB.Add(sB);
 
-            // Látható lapok
-            List<int> visible = new List<int>();
+            // visible faces
+            bool[] visible = new bool[faces.Count];
+            int visCount = 0;
             for (int i = 0; i < faces.Count; ++i)
             {
-                Vector3 A = pts[faces[i][0]];
-                Vector3 B = pts[faces[i][1]];
-                Vector3 C = pts[faces[i][2]];
-                Vector3 nrm = Vector3.Cross(B - A, C - A);
-                float len = nrm.magnitude;
-                if (len < EPS) continue;
-                nrm /= len;
-                if (Vector3.Dot(nrm, A) < 0f) nrm = -nrm;
-                if (Vector3.Dot(nrm, support - A) > EPS) visible.Add(i);
+                if (Vector3.Dot(faces[i].n, sup - pts[faces[i].a]) > EPS)
+                {
+                    visible[i] = true; visCount++;
+                }
             }
-            if (visible.Count == 0) return result;
+            if (visCount == 0) return Finish(faces[closestIdx], pts, ptA, ptB);
 
-            // Horizont kör
+            // horizon
             List<int[]> horizon = new List<int[]>();
-            foreach (int vi in visible)
+            for (int i = 0; i < faces.Count; ++i)
             {
-                int[] f = faces[vi];
-                AddHorizonEdge(horizon, f[0], f[1]);
-                AddHorizonEdge(horizon, f[1], f[2]);
-                AddHorizonEdge(horizon, f[2], f[0]);
+                if (!visible[i]) continue;
+                AddHorizonEdge(horizon, faces[i].a, faces[i].b);
+                AddHorizonEdge(horizon, faces[i].b, faces[i].c);
+                AddHorizonEdge(horizon, faces[i].c, faces[i].a);
             }
-            if (horizon.Count < 3) return result;
+            if (horizon.Count < 3) return Finish(faces[closestIdx], pts, ptA, ptB);
 
-            // Látható lapok törlése
-            visible.Sort();
-            for (int i = visible.Count - 1; i >= 0; --i)
-                faces.RemoveAt(visible[i]);
+            // rebuild face list
+            List<Face> newFaces = new List<Face>(faces.Count + horizon.Count);
+            for (int i = 0; i < faces.Count; ++i)
+                if (!visible[i]) newFaces.Add(faces[i]);
+            faces = newFaces;
 
-            // Új lapok
             foreach (int[] he in horizon)
-                AddFace(pts, faces, he[0], he[1], newIdx);
+                AddFace(pts, faces, he[0], he[1], newIdx, interior);
+
+            if (faces.Count < 4) return result;
         }
 
-        return result;
+        // Out of iterations: the closest face is still a good approximation, don't throw it away.
+        closestIdx = -1;
+        float best = float.PositiveInfinity;
+        for (int i = 0; i < faces.Count; ++i)
+            if (faces[i].d < best) { best = faces[i].d; closestIdx = i; }
+        if (closestIdx < 0) return result;
+        return Finish(faces[closestIdx], pts, ptA, ptB);
     }
 
-    // --- segédfüggvények ---
+    // ---------------------------------------------------------------------------------
 
-    static void AddFace(List<Vector3> pts, List<int[]> faces, int i0, int i1, int i2)
+    static EPAResult Finish(Face f, List<Vector3> pts, List<Vector3> ptA, List<Vector3> ptB)
+    {
+        EPAResult r = new EPAResult();
+        r.valid = true;
+        r.normal = f.n;
+        r.depth = Mathf.Max(0f, f.d);
+
+        Vector3 pOnFace = f.n * f.d;
+        Vector3 bary = Barycentric(pts[f.a], pts[f.b], pts[f.c], pOnFace);
+        r.pointA = bary.x * ptA[f.a] + bary.y * ptA[f.b] + bary.z * ptA[f.c];
+        r.pointB = bary.x * ptB[f.a] + bary.y * ptB[f.b] + bary.z * ptB[f.c];
+        return r;
+    }
+
+    static bool Independent(List<Vector3> pts, Vector3 c)
+    {
+        switch (pts.Count)
+        {
+            case 0: return true;
+            case 1: return (c - pts[0]).sqrMagnitude > 1e-8f;
+            case 2: return Vector3.Cross(pts[1] - pts[0], c - pts[0]).sqrMagnitude > 1e-10f;
+            case 3:
+                return Mathf.Abs(Vector3.Dot(Vector3.Cross(pts[1] - pts[0], pts[2] - pts[0]), c - pts[0])) > 1e-6f;
+            default: return false;
+        }
+    }
+
+    static bool CompleteTetrahedron(
+        List<Vector3> pts, List<Vector3> ptA, List<Vector3> ptB,
+        Func<Vector3, Vector3> supportA, Func<Vector3, Vector3> supportB)
+    {
+        while (pts.Count < 4)
+        {
+            List<Vector3> dirs = new List<Vector3>(8);
+            switch (pts.Count)
+            {
+                case 0:
+                    dirs.Add(Vector3.right);
+                    break;
+                case 1:
+                    dirs.Add(Vector3.right); dirs.Add(Vector3.left);
+                    dirs.Add(Vector3.up);    dirs.Add(Vector3.down);
+                    dirs.Add(Vector3.forward); dirs.Add(Vector3.back);
+                    break;
+                case 2:
+                {
+                    Vector3 d = pts[1] - pts[0];
+                    Vector3[] axes = { Vector3.right, Vector3.up, Vector3.forward };
+                    foreach (Vector3 ax in axes)
+                    {
+                        Vector3 u = Vector3.Cross(d, ax);
+                        if (u.sqrMagnitude > 1e-12f) { dirs.Add(u); dirs.Add(-u); }
+                    }
+                    break;
+                }
+                case 3:
+                {
+                    Vector3 n = Vector3.Cross(pts[1] - pts[0], pts[2] - pts[0]);
+                    dirs.Add(n); dirs.Add(-n);
+                    break;
+                }
+            }
+
+            bool added = false;
+            foreach (Vector3 dir in dirs)
+            {
+                Vector3 sA = supportA(-dir);
+                Vector3 sB = supportB(dir);
+                Vector3 s = sB - sA;
+                if (Independent(pts, s))
+                {
+                    pts.Add(s); ptA.Add(sA); ptB.Add(sB);
+                    added = true;
+                    break;
+                }
+            }
+            if (!added) return false;
+        }
+        return true;
+    }
+
+    // Faces are oriented outward using the interior point, so winding is consistent.
+    static void AddFace(List<Vector3> pts, List<Face> faces, int i0, int i1, int i2, Vector3 interior)
     {
         Vector3 A = pts[i0], B = pts[i1], C = pts[i2];
-        Vector3 nrm = Vector3.Cross(B - A, C - A);
-        if (Vector3.Dot(nrm, A) < 0f) { int t = i1; i1 = i2; i2 = t; }
-        faces.Add(new int[] { i0, i1, i2 });
+        Vector3 n = Vector3.Cross(B - A, C - A);
+        float len = n.magnitude;
+        if (len < EPS) return;
+        n /= len;
+        if (Vector3.Dot(n, A - interior) < 0f)
+        {
+            n = -n;
+            int t = i1; i1 = i2; i2 = t;
+        }
+        Face f = new Face();
+        f.a = i0; f.b = i1; f.c = i2;
+        f.n = n;
+        f.d = Vector3.Dot(n, A);
+        faces.Add(f);
     }
 
     static void AddHorizonEdge(List<int[]> horizon, int a, int b)
@@ -174,7 +253,6 @@ public static class EPA
         horizon.Add(new int[] { a, b });
     }
 
-    // Barycentrikus koordináták egy háromszögben (p a síkban van)
     static Vector3 Barycentric(Vector3 a, Vector3 b, Vector3 c, Vector3 p)
     {
         Vector3 v0 = b - a, v1 = c - a, v2 = p - a;
@@ -184,11 +262,10 @@ public static class EPA
         float d20 = Vector3.Dot(v2, v0);
         float d21 = Vector3.Dot(v2, v1);
         float denom = d00 * d11 - d01 * d01;
-        if (Mathf.Abs(denom) < EPS) return new Vector3(1f, 0f, 0f);
-        float invDenom = 1f / denom;
-        float v = (d11 * d20 - d01 * d21) * invDenom;
-        float w = (d00 * d21 - d01 * d20) * invDenom;
-        float u = 1f - v - w;
-        return new Vector3(u, v, w);
+        if (Mathf.Abs(denom) < 1e-12f) return new Vector3(1f, 0f, 0f);
+        float inv = 1f / denom;
+        float v = (d11 * d20 - d01 * d21) * inv;
+        float w = (d00 * d21 - d01 * d20) * inv;
+        return new Vector3(1f - v - w, v, w);
     }
 }

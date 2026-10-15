@@ -41,6 +41,7 @@ public class PlayerMovement : MonoBehaviour
     private bool fire2ButtonHeld = false;
     private float horizontalInput = 0f;
     private float verticalInput = 0f;
+    
 
     //TODO: get a mononbehaviour of ground speed, water current and trigger activation
     class ColliderResolver  //to not call a lot of getcomponents
@@ -522,20 +523,32 @@ public class PlayerMovement : MonoBehaviour
 
     Vector3 GetUnstuck(Vector3 pos)
     {
-        for (int i = -2; i < 3; ++i)
+        Vector3 he = playerBounds() * 0.5f;
+
+        for (int iter = 0; iter < 8; ++iter)
         {
-            for (int e = -2; e < 3; ++e)
+            Collider[] cols = Physics.OverlapBox(pos, he, Quaternion.identity, colliderMask);
+            bool moved = false;
+            for (int i = 0; i < cols.Length; ++i)
             {
-                for (int f = -2; f < 3; ++f)
+                Vector3 mtv;
+                if (gjkClosest.ComputeMTV(colliderResolver.ResolveCollider(cols[i]), he, pos, out mtv))
                 {
-                    Vector3 testPos = new Vector3(pos.x + e, pos.y - i, pos.z + f); //check straight up first
-                    if (!UnsweptTrace(testPos))
-                    {
-                        return testPos;
-                    }
+                    pos += mtv + mtv.normalized * playerVariables.surfaceExtention;
+                    moved = true;
                 }
             }
+            if (!moved || !UnsweptTrace(pos)) return pos;
         }
+
+        // fallback: the old brute force search
+        for (int i = -2; i < 3; ++i)
+            for (int e = -2; e < 3; ++e)
+                for (int f = -2; f < 3; ++f)
+                {
+                    Vector3 testPos = new Vector3(pos.x + e, pos.y - i, pos.z + f);
+                    if (!UnsweptTrace(testPos)) return testPos;
+                }
         return pos;
     }
 
@@ -547,6 +560,7 @@ public class PlayerMovement : MonoBehaviour
         Vector3 wishdir = wishmove.normalized;
         hit = new RaycastHit();
         collidedObject = null;
+        if (wishdist < 1e-5f) return 1f;   // nothing to sweep (avoids NaN in bestDistance / wishdist)
 
         //find all possible collisions along path (inaccurate, has to be corrected, checks larger area than should, gets false positives and 0-distance hits with bat values)
         RaycastHit[] hits = Physics.BoxCastAll(
@@ -613,7 +627,7 @@ public class PlayerMovement : MonoBehaviour
         {
             hit.distance = bestHit.distance;
             hit.point = bestHit.point;
-            hit.normal = -bestHit.normal;
+            hit.normal = bestHit.normal;
             collidedObject = bestObject;
             /*
             Debug.Log(hit.distance);
@@ -623,7 +637,7 @@ public class PlayerMovement : MonoBehaviour
             Debug.Log(startPos);
             Debug.Log(velocity);
             */
-            return bestDistance / wishdist;
+            return Mathf.Clamp01(bestDistance / wishdist);
         }
         else
         {
@@ -654,34 +668,9 @@ public class PlayerMovement : MonoBehaviour
         {
             return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) + playerVariables.surfaceExtention * hit.normal, (wishpos - startPos).normalized);
         }
-        Vector3 remove = Vector3.Project(velocity, hit.normal);
-        if (Vector3.Dot(remove, hit.normal) < 0f)
-        {
-            remove *= -1f;
-        }
-        if (hit.distance == 0f) //overlap at start
-        {
-            //stuck in something, if by going towards endPos, we leave it, move to where it the box would fully leave the collider, that is the distance traveled
-            //if cannot escape, just end with startPos
-            RaycastHit backHit;
-            float backCompleted = SweptTrace(startPos, wishpos, out backHit, out dummyObject); //this cannot be >= 1.0f, because then we wouldn't already be inside geometry
-            if (backCompleted >= 1.0f) //not actually in geometry according to this check, shouldn't happen, also backHit.normal would be 0, so the surfaceextension would do nothing
-            {
-                return startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * backCompleted + playerVariables.surfaceExtention * backHit.normal, (wishpos - startPos).normalized);
-            }
-            if (backCompleted == 0f) //completely stuck, cannot move, for some reason this happens a lot when it shouldn't
-            {
-                velocity = Vector3.zero; //unswept trace does this better
-                return startPos;
-            }
-            //move enough to just leave geometry to get unstuck,
-            return Move(depth - 1, timeLeft - (1.0f - backCompleted) * timeLeft, startPos + Max(new Vector3(0f, 0f, 0f), (wishpos - startPos) * (1.0f - backCompleted) + playerVariables.surfaceExtention * backHit.normal, (wishpos - startPos).normalized));
-        }
-        else
-        {
-            //velocity = velocity + Math.Abs(Vector3.Dot(velocity, hit.normal)) * hit.normal;
-            velocity = velocity + remove;
-        }
+        float into = Vector3.Dot(velocity, hit.normal);
+        Vector3 remove = into < 0f ? -into * hit.normal : Vector3.zero;
+        velocity = velocity + remove;
         //if collided wall, move playerup 18 units, forwards 0.04 units and stuckcheck+groundcheck to handle stairs
         //if (hit.distance < 1f)
         //{

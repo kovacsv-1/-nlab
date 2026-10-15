@@ -1,724 +1,422 @@
 using UnityEngine;
-using System;
-using System.Collections;
-using System.Collections.Generic;
 
 public struct GJKHit
 {
     public bool hit;
-    public Vector3 point;      // contact point
-    public Vector3 normal;     // collision normal
-    public float distance;     // distance along wishMove
+    public Vector3 point;      // contact point (on the mesh)
+    public Vector3 normal;     // surface normal pointing AWAY from the mesh, towards the player
+    public float distance;     // distance travelled along wishMove before contact (== |wishMove| when nothing is hit)
     public Vector3 closestA;   // closest point on player
     public Vector3 closestB;   // closest point on mesh
 }
 
+// Distance GJK + conservative-advancement shape cast + EPA based MTV.
+//
+// Conventions
+//   CSO = mesh - player
+//   p   = closest point of the CSO to the origin  (p == closestB - closestA)
+//   p/|p| points from the player towards the mesh, so the surface normal facing the player is -p/|p|.
+//
+// Assumption: every MeshCollider is CONVEX (GJK only sees the convex hull of the vertices).
 public class GJKClosest : MonoBehaviour
 {
-    //based on https://github.com/kujukuju/KodaPhysics/blob/master/src/GjkComplex.jai
-    //gets distance of objects and closest point on both (+ normals)
-    //could do it along wishdir if solved in 2d (points projected onto a plane perpendicular to the direction)
-    //then make solvetetrahedron always step towards -dir, if it encapsulates origin, we started inside, otherwise find the point closest to origin along -dir to find contact
-    //if encapsulates origin then started inside and make tetrahedron step in the wishdir direction, to hopefully find first exit point
-    //this is likely one of the following:
-    // https://github.com/kujukuju/KodaPhysics/blob/master/src/GjkDir.jai
-    // https://github.com/kujukuju/KodaPhysics/blob/master/src/GjkBullet.jai
-    //also, can use EPA algorithm to resolve being stuck in a mesh, but might just nudge the player around, that is how source works 
-    //might not be needed at all
+    const int   MAX_GJK_ITER    = 64;
+    const int   MAX_CAST_ITER   = 32;
+    const float OVERLAP_DIST_SQ = 1e-10f;  // |p|^2 below this counts as touching/overlapping
+    const float CONTACT_DIST    = 1e-3f;   // shapes closer than this are "in contact"
+    const float APPROACH_EPS    = 1e-4f;   // min cos between movement and contact normal to count as "moving into"
+    const float NORMAL_MIN_DIST = 1e-2f;   // below this distance the closest-point direction is noisy
 
-    private float EPSILON = 0.0000001f; //seems good enough, play around with preciseness
+    struct Vertex { public Vector3 cso, a, b; }
 
-    struct SimplexSolve {
-        public Vector3 p;
-        public Vector3 dir;
-    }
-
-    public class ComplexSimplex {  //could just be a matrix
-        public Vector3 a; public Vector3 a1; public Vector3 a2;
-        public Vector3 b; public Vector3 b1; public Vector3 b2;
-        public Vector3 c; public Vector3 c1; public Vector3 c2;
-        public Vector3 d; public Vector3 d1; public Vector3 d2;
+    class Simplex
+    {
+        public Vertex[] v = new Vertex[4];
+        public float[] l = new float[4];   // barycentric weights of the closest point
         public int count;
 
-        //Vector3[] a_all = new Vector3[3];
-        //Vector3[] b_all = new Vector3[3];
-        //Vector3[] c_all = new Vector3[3];
-        //Vector3[] d_all = new Vector3[3];
-
-        public ComplexSimplex Copy()
+        public void CopyFrom(Simplex o)
         {
-            ComplexSimplex ret = new ComplexSimplex();
-            ret.a = a; ret.a1 = a1; ret.a2 = a2;
-            ret.b = b; ret.b1 = b1; ret.b2 = b2;
-            ret.c = c; ret.c1 = c1; ret.c2 = c2;
-            ret.d = d; ret.d1 = d1; ret.d2 = d2;
-            ret.count = count;
-            //Array.Copy(a_all, ret.a_all, 3);
-            //Array.Copy(b_all, ret.b_all, 3);
-            //Array.Copy(c_all, ret.c_all, 3);
-            //Array.Copy(d_all, ret.d_all, 3);
-            return ret;
+            for (int i = 0; i < 4; ++i) { v[i] = o.v[i]; l[i] = o.l[i]; }
+            count = o.count;
         }
     }
 
-    // returns whether or not the shapes intersect, the simplex, and the distance between shapes if allowed to resolve completely, this has some shapecast logic it returns, but shouldn't be used for that
-    public GJKHit GJKComplex(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove, out ComplexSimplex bestSimplex) { //bool, ComplexSimplex, Vector3, Vector3 is what this should return
-        ComplexSimplex simplex = new ComplexSimplex();
-        Vector3 direction = wishMove.normalized;
-        simplex.a1 = GJKSupport.PlayerBox(-direction, playerHalfExtents) + playerPos;
-        simplex.a2 = GJKSupport.Mesh(direction, mesh);
-        simplex.a = simplex.a2 - simplex.a1;
-        simplex.count = 1;
-        bestSimplex = new ComplexSimplex();
-        float bestSupportDifference = 0f;
-        Vector3 bestP = Vector3.zero;
-        Vector3 bestDir = Vector3.zero;
+    struct GJKResult
+    {
+        public bool overlap;
+        public float distance;
+        public Vector3 p;
+        public Vector3 closestA, closestB;
+    }
+
+    // scratch data (not re-entrant, which is fine for single threaded Unity)
+    readonly Simplex simplex = new Simplex();
+    readonly Simplex tmp = new Simplex();
+    readonly Simplex best = new Simplex();
+
+    // ------------------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------------------
+
+    // Distance / closest points between player box at playerPos and the mesh.
+    public GJKHit GJKComplex(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos)
+    {
         GJKHit ret = new GJKHit();
-        SimplexSolve closests = new SimplexSolve();
-        Vector3 separation = Vector3.zero;
-        Vector3 lastNonZeroDir = Vector3.zero;
-        SimplexSolve p_dir = new SimplexSolve();
-        // if one triangle is unnecessarily huge, epsilon might not be large enough to check directional values against each other if its almost exactly touching
-        for (int i = 0; i < 60; ++i)
-        { //60 iterations of loop to converge
-
-            // solving direction from cross products gives much more accuracy than resolving from p
-            // resolving from p can result in infinite loops when epsilon is too small to check directional differences
-            switch (simplex.count)
+        GJKResult r = Distance(mesh, playerHalfExtents, playerPos);
+        if (r.overlap)
+        {
+            ret.hit = true;
+            ret.distance = 0f;
+            EPAResult e;
+            if (RunEPA(mesh, playerHalfExtents, playerPos, out e))
             {
-                case 1:
-                    p_dir = PointSimplex(ref simplex);
-                    break;
-                case 2:
-                    p_dir = LineSimplex(ref simplex);
-                    break;
-                case 3:
-                    p_dir = TriangleSimplex(ref simplex);
-                    break;
-                case 4:
-                    p_dir = TetrahedronSimplex(ref simplex);
-                    break;
-                default:
-                    ret.hit = true;
-                    ret.distance = 0f;
-                    return ret;
+                ret.normal = e.normal;
+                ret.closestA = e.pointA;
+                ret.closestB = e.pointB;
+                ret.point = e.pointB;
             }
-
-            if (p_dir.dir.sqrMagnitude > EPSILON)
-            {
-                lastNonZeroDir = p_dir.dir;
-            }
-            // checking if distance squared from p to 0 is less than epsilon rather than comparing it to 0
-            // because I'm not entirely sure how it would work together with the tetrahedron cross product
-            // check and the support point directional check below
-            if (p_dir.p.magnitude < EPSILON)
-            {
-                closests = GetLocalPoints(simplex, p_dir.p); //speed
-                separation = closests.dir - closests.p;
-                ret.hit = true;
-                ret.closestA = closests.p; //THESE ARE 0 0 0, this is the issue here
-                ret.closestB = closests.dir;  //THESE ARE 0 0 0, this is the issue here
-                //if (separation.sqrMagnitude < EPSILON)
-                //{
-                //    ret.normal = Vector3.zero;
-                //}
-                //else
-                //{
-                    //ret.normal = separation.normalized; //p_dir.dir.normalized;
-                //} 
-                //ret.distance = Vector3.Dot(separation, wishMove.normalized);
-                ret.distance = separation.magnitude;
-                ret.point = closests.dir;
-
-                //llm suggested normals
-                // The search direction p_dir.dir points from the CSO simplex toward the origin.
-                // This is the direction from mesh to player (the correct outward normal).
-                if (p_dir.p.sqrMagnitude > EPSILON)
-                {
-                    ret.normal = p_dir.p.normalized;
-                }
-                else if (p_dir.dir.sqrMagnitude > EPSILON)
-                {
-                    ret.normal = -p_dir.dir.normalized;
-                }
-                else
-                {
-                    ret.normal = lastNonZeroDir.normalized;
-                }
-                //Debug.Log(ret.normal);
-                //Debug.Log(ret.distance);
-                //Debug.Log(ret.closestA);
-                //Debug.Log(ret.closestB);
-                return ret;
-            }
-
-            Vector3 support1 = GJKSupport.PlayerBox(-p_dir.dir, playerHalfExtents) + playerPos;
-            Vector3 support2 = GJKSupport.Mesh(p_dir.dir, mesh);;
-            Vector3 support = support2 - support1;
-
-            // if p is more than or equivalently extremal in the direction of the origin, we can't find a better support point
-            // scaled_epsilon := support.magnitude * EPSILON;
-            // print("% >= %\n", dir_strength(p, direction), dir_strength(support, direction));
-            //this causes weird behaviour 
-            //this is the part that returns 0 distance even though it doesn't return 1 distance, it might return incorrect normals, so search is backwards even though I sweep the convex hull to filter only for collisions in the correct direction
-            float p_dirStrength = GetDirStrength(p_dir.p, p_dir.dir);
-            float support_dirStrength = GetDirStrength(support, p_dir.dir) - EPSILON;
-            /*if (Vector3.Dot(support, p_dir.dir) < 0)*/ if (p_dirStrength >= support_dirStrength - EPSILON)
-            {
-                closests = GetLocalPoints(simplex, p_dir.p); //speed
-                separation = closests.dir - closests.p;
-                ret.hit = false;
-                ret.closestA = closests.p;
-                ret.closestB = closests.dir;
-                if (p_dir.p.sqrMagnitude > EPSILON)
-                {
-                    ret.normal = p_dir.p.normalized;
-                }
-                else if (p_dir.dir.sqrMagnitude > EPSILON)
-                {
-                    ret.normal = -p_dir.dir.normalized;
-                }
-                else
-                {
-                    ret.normal = lastNonZeroDir.normalized;
-                }
-                //ret.normal *= -1f; //this is needed
-                ret.distance = separation.magnitude;
-                ret.point = closests.dir;
-                return ret;
-            }
-
-            // this solves the case where the objects are both very large and infinitely close to the each other (but not within epsilon)
-            // when the loop exits itll return the best simplex anyways
-            if (support_dirStrength - p_dirStrength > bestSupportDifference)
-            {
-                bestSupportDifference = support_dirStrength - p_dirStrength;
-                bestSimplex = simplex.Copy();
-                bestP = p_dir.p;
-                bestDir = p_dir.dir;
-            }
-
-            simplex.d = simplex.c; simplex.d1 = simplex.c1; simplex.d2 = simplex.c2;
-            simplex.c = simplex.b; simplex.c1 = simplex.b1; simplex.c2 = simplex.b2;
-            simplex.b = simplex.a; simplex.b1 = simplex.a1; simplex.b2 = simplex.a2;
-            simplex.count += 1;
-
-            simplex.a1 = support1;
-            simplex.a2 = support2;
-            simplex.a = support;
+            return ret;
         }
-
-        closests = GetLocalPoints(bestSimplex, bestP); //use struct for speed
-        separation = closests.dir - closests.p;
         ret.hit = false;
-        ret.closestA = closests.p;
-        ret.closestB = closests.dir;
-        if (p_dir.p.sqrMagnitude > EPSILON)
-        {
-            ret.normal = p_dir.p.normalized;
-        }
-        else if (p_dir.dir.sqrMagnitude > EPSILON)
-        {
-            ret.normal = -p_dir.dir.normalized;
-        }
-        else
-        {
-            ret.normal = lastNonZeroDir.normalized;
-        }
-        ret.distance = separation.magnitude;
-        ret.point = closests.dir;
+        ret.distance = r.distance;
+        ret.normal = -r.p / r.distance;
+        ret.closestA = r.closestA;
+        ret.closestB = r.closestB;
+        ret.point = r.closestB;
         return ret;
     }
 
-    public GJKHit GJKShapeCast(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, Vector3 wishMove) //TODO: for real
+    // Sweeps the box from startPos along wishMove with conservative advancement.
+    // Contact while moving along / away from the surface is NOT a hit (old code reported a hit with
+    // distance 0 for any touching surface, which is what glued the player to floors and walls).
+    public GJKHit GJKShapeCast(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 startPos, Vector3 wishMove)
     {
-        Vector3 dir = wishMove.normalized;
-        if (dir.magnitude <= 0f)
-        {
-            dir = Vector3.one;
-        } 
-        float remaining = wishMove.magnitude;
-        float wishdist = wishMove.magnitude;
-        float moved = 0f;
-
-        Vector3 x = playerPos;
-
         GJKHit ret = new GJKHit();
-        GJKHit prev = new GJKHit();
+        float wishDist = wishMove.magnitude;
+        ret.distance = wishDist;
+        if (wishDist < 1e-6f) return ret;
 
-        ComplexSimplex cs;
+        Vector3 dir = wishMove / wishDist;
 
-        for (int step = 0; step < 40; step++)
+        float t = 0f;
+        float prevT = 0f;
+        Vector3 normal = Vector3.zero;
+        bool haveNormal = false;
+
+        for (int i = 0; i < MAX_CAST_ITER; ++i)
         {
-            GJKHit gjk = GJKComplex(mesh, playerHalfExtents, x, dir, out cs); //just direction for wishmove, doesn't take distance
-            // overlap
-            if (gjk.hit || gjk.distance < EPSILON)
+            Vector3 x = startPos + dir * t;
+            GJKResult r = Distance(mesh, playerHalfExtents, x);
+
+            if (r.overlap)
             {
-                ret.hit = true;
-                ret.distance = (x - playerPos).magnitude;
-                if (ret.distance > EPSILON)
+                if (i == 0)
                 {
-                    ret.distance -= EPSILON;
+                    // started overlapping (or exactly touching): use EPA for the normal
+                    EPAResult e;
+                    Vector3 n = RunEPA(mesh, playerHalfExtents, x, out e) ? e.normal : -dir;
+                    if (Vector3.Dot(dir, n) < -APPROACH_EPS)
+                        return MakeHit(0f, n, e.pointA, e.pointB, wishDist);
+                    return ret; // leaving or sliding, let the player move
                 }
-                ret.normal = prev.normal.magnitude > 0 ? prev.normal : gjk.normal;
-                //ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, dir).normal;
-                ret.point = gjk.point;
-                //Debug.Log("A");
-                //Debug.Log(ret.distance); //always 0???
-                return ret;
-            }
-            
-
-            float denom = Vector3.Dot(gjk.normal, dir); //* -1.0f
-
-            // moving away, this shouldn't happen as I check for collisions in sweep ahead of time, but this is what is causing the issue
-            if (denom <= -EPSILON) //for some reason this case runs on the last frame I am outside of geometry, this gets me stuck somehow
-            {
-                ret.hit = false;
-                //Debug.Log("E");
-                ret.distance = wishdist;
-                //Debug.Log(ret.distance); //always 0???
-                return ret;
+                // numerical overshoot: fall back to the last safe position
+                if (!haveNormal) normal = -dir;
+                return MakeHit(prevT, normal, r.closestA, r.closestB, wishDist);
             }
 
-            //float stepDist = gjk.distance;
-            float stepDist = gjk.distance / denom;
-
-            if (stepDist > remaining && remaining > EPSILON)
+            float d = r.distance;
+            Vector3 toMesh = r.p / d;
+            if (d > NORMAL_MIN_DIST || !haveNormal)
             {
-                ret.hit = false;
-                ret.distance = wishdist;
-                //this gets us stuck in slopes and on ground sometimes, idk how
-                //Debug.Log("B");
-                //Debug.Log(ret.distance);
-                return ret;
-            }
-            stepDist = Math.Max(0f, stepDist); //always have small margin, so we don't actually hit, and get bad separation
-            // advance
-            x += dir * stepDist;
-            remaining -= stepDist;
-            moved += stepDist;
-
-            if (remaining <= EPSILON)
-            {
-                ret.hit = false;
-                //Debug.Log("C");
-                //Debug.Log(ret.distance);
-                return ret;
+                normal = -toMesh;
+                haveNormal = true;
             }
 
-            prev = gjk;
-        }
+            float approach = Vector3.Dot(dir, toMesh);
 
-        ret.hit = true;
-        ret.distance = (x - playerPos).magnitude; //this case is 0 for some reason, idk how we even get into this branch (exit the loop after 30 iterations)
-        if (ret.distance > EPSILON)
-        {
-            ret.distance -= EPSILON;
-        }
-        ret.normal = prev.normal.magnitude > 0 ? prev.normal : GJKComplex(mesh, playerHalfExtents, x - dir * 10f, wishMove, out cs).normal;
-        //I only call this if I am certain a collision will occur as I check gjk intersection for swept hull of movement and mesh before
-        //Debug.Log("D");
-        ret.distance = wishdist;
-        //Debug.Log(ret.distance);
-        return ret;
-    }
-
-    //simplex cases
-    SimplexSolve PointSimplex(ref ComplexSimplex simplex)
-    {
-        SimplexSolve ret = new SimplexSolve();
-        ret.p = simplex.a;
-        ret.dir = -simplex.a;
-        return ret;
-    }
-
-    SimplexSolve LineSimplex(ref ComplexSimplex simplex)
-    {
-        Vector3 ab = simplex.b - simplex.a; Vector3 ao = -simplex.a;
-        if (Vector3.Dot(ab, ao) > 0)
-        {
-            SimplexSolve ret = new SimplexSolve();
-            ret.p = simplex.a + Vector3.Dot(ao, ab) / Vector3.Dot(ab, ab) * ab;
-            ret.dir = Vector3.Cross(Vector3.Cross(ab, ao), ab);
-            return ret;
-        }
-        else
-        {
-            simplex.count = 1;
-            SimplexSolve ret = new SimplexSolve();
-            ret.p = simplex.a;
-            ret.dir = ao;
-            return ret;
-        }
-    }
-
-    SimplexSolve TriangleSimplex(ref ComplexSimplex simplex)
-    {
-        Vector3 ab = simplex.b - simplex.a;
-        Vector3 ac = simplex.c - simplex.a;
-        Vector3 abc = Vector3.Cross(ab, ac);
-        Vector3 ao = -simplex.a;
-        if (Vector3.Dot(Vector3.Cross(abc, ac), ao) > 0)
-        {
-            if (Vector3.Dot(ac, ao) > 0)
+            if (d < CONTACT_DIST)
             {
-                // the origin is nearest to the line ac
-                // simplex c remains as c
-                simplex.b = simplex.c;
-                simplex.b1 = simplex.c1;
-                simplex.b2 = simplex.c2;
-                simplex.count = 2;
-                float t = Vector3.Dot(ao, ac) / Vector3.Dot(ac, ac);
-                SimplexSolve ret = new SimplexSolve();
-                ret.p = simplex.a + t * ac;
-                ret.dir = Vector3.Cross(Vector3.Cross(ac, ao), ac);
-                return ret;
+                if (approach > APPROACH_EPS)
+                    return MakeHit(t, normal, r.closestA, r.closestB, wishDist);
+                return ret; // touching, but not moving into it
             }
-            else
-            {
-                if (Vector3.Dot(ab, ao) > 0)
-                {
-                    // the origin is nearest to the line ab
-                    simplex.count = 2;
-                    float t = Vector3.Dot(ao, ab) / Vector3.Dot(ab, ab);
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a;
-                    ret.dir = ao;
-                    return ret;
-                }
-                else
-                {
-                    // the origin is nearest to the point a
-                    simplex.count = 1;
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a;
-                    ret.dir = ao;
-                    return ret;
-                }
-            }
+
+            if (approach <= 1e-6f) return ret; // moving away or parallel, will never hit this convex shape
+
+            float step = d / approach;         // safe distance we can advance without touching
+            if (t + step > wishDist) return ret;
+
+            prevT = t;
+            t += step;
         }
-        else
-        {
-            if (Vector3.Dot(Vector3.Cross(ab, abc), ao) > 0)
-            {
-                if (Vector3.Dot(ab, ao) > 0)
-                {
-                    // the origin is nearest to the line ab
-                    simplex.count = 2;
-                    float t = Vector3.Dot(ao, ab) / Vector3.Dot(ab, ab);
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a + t * ab;
-                    ret.dir = Vector3.Cross(Vector3.Cross(ab, ao), ab);
-                    return ret;
-                }
-                else
-                {
-                    // the origin is nearest to the point a
-                    simplex.count = 1;
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a;
-                    ret.dir = ao;
-                    return ret;
-                }
-            }
-            else
-            {
-                if (Vector3.Dot(abc, ao) > 0)
-                {
-                    // the origin is nearest to the triangle abc
-                    Vector3 bo = -simplex.b;
-                    Vector3 co = -simplex.c;
-                    float d1 = Vector3.Dot(ab, ao);
-                    float d2 = Vector3.Dot(ac, ao);
-                    float d3 = Vector3.Dot(ab, bo);
-                    float d4 = Vector3.Dot(ac, bo);
-                    float d5 = Vector3.Dot(ab, co);
-                    float d6 = Vector3.Dot(ac, co);
-                    float va = d3 * d6 - d5 * d4;
-                    float vb = d5 * d2 - d1 * d6;
-                    float vc = d1 * d4 - d3 * d2;
-                    float denom = 1f / (va + vb + vc);
-                    float v = vb * denom;
-                    float w = vc * denom;
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a + ab * v + ac * w;
-                    ret.dir = abc;
-                    return ret;
-                }
-                else
-                {
-                    // the origin is nearest to the triangle acb
-                    Vector3 tmp = simplex.b; Vector3 tmp1 = simplex.b1; Vector3 tmp2 = simplex.b2;
-                    simplex.b = simplex.c; simplex.b1 = simplex.c1; simplex.b2 = simplex.c2;
-                    simplex.c = tmp; simplex.c1 = tmp1; simplex.c2 = tmp2;
-                    Vector3 bo = -simplex.b;
-                    Vector3 co = -simplex.c;
-                    float d1 = Vector3.Dot(ac, ao);
-                    float d2 = Vector3.Dot(ab, ao);
-                    float d3 = Vector3.Dot(ac, co);
-                    float d4 = Vector3.Dot(ab, co);
-                    float d5 = Vector3.Dot(ac, bo);
-                    float d6 = Vector3.Dot(ab, bo);
-                    float va = d3 * d6 - d5 * d4;
-                    float vb = d5 * d2 - d1 * d6;
-                    float vc = d1 * d4 - d3 * d2;
-                    float denom = 1f / (va + vb + vc);
-                    float v = vb * denom;
-                    float w = vc * denom;
-                    SimplexSolve ret = new SimplexSolve();
-                    ret.p = simplex.a + ab * v + ac * w;
-                    ret.dir = -abc;
-                    return ret;
-                }
-            }
-        }
+
+        // didn't converge: report a hit at the last safe position (caller already knows the sweep hull intersects)
+        return MakeHit(t, haveNormal ? normal : -dir, startPos, startPos, wishDist);
     }
 
-    SimplexSolve TetrahedronSimplex(ref ComplexSimplex simplex)
-    {
-        Vector3 abc = Vector3.Cross(simplex.b - simplex.a, simplex.c - simplex.a);
-        Vector3 acd = Vector3.Cross(simplex.c - simplex.a, simplex.d - simplex.a);
-        Vector3 adb = Vector3.Cross(simplex.d - simplex.a, simplex.b - simplex.a);
-        Vector3 ao = -simplex.a;
-        SimplexSolve ret = new SimplexSolve();
-        /*if (Vector3.Dot(abc, simplex.d - simplex.a) > 0) //if normals pointing inward, make them point outward, should be unnecessary based on how I calculate them
-        {
-            abc = -abc;
-        }
-        if (Vector3.Dot(acd, simplex.b - simplex.a) > 0)
-        {
-            acd = -acd;
-        }
-        if (Vector3.Dot(adb, simplex.c - simplex.a) > 0)
-        {
-            adb = -adb;
-        }*/
-        bool outsideabc = Vector3.Dot(abc, ao) > 0;
-        bool outsideacd = Vector3.Dot(acd, ao) > 0;
-        bool outsideadb = Vector3.Dot(adb, ao) > 0;
-        if (!outsideabc && !outsideacd && !outsideadb)
-        {
-            // the origin is inside the simplex
-            ret.p = Vector3.zero;
-            ret.dir = Vector3.zero;
-            return ret;
-        }
-        if (outsideabc && !outsideacd && !outsideadb)
-        {
-            // the origin falls somewhere near abc
-            simplex.count = 3;
-            return TriangleSimplex(ref simplex);
-        }
-        if (!outsideabc && outsideacd && !outsideadb)
-        {
-            // the origin falls somewhere near acd
-            simplex.b = simplex.c; simplex.b1 = simplex.c1; simplex.b2 = simplex.c2;
-            simplex.c = simplex.d; simplex.c1 = simplex.d1; simplex.c2 = simplex.d2;
-            simplex.count = 3;
-            return TriangleSimplex(ref simplex);
-        }
-        if (!outsideabc && !outsideacd && outsideadb)
-        {
-            // the origin falls somewhere near adb
-            simplex.c = simplex.b; simplex.c1 = simplex.b1; simplex.c2 = simplex.b2;
-            simplex.b = simplex.d; simplex.b1 = simplex.d1; simplex.b2 = simplex.d2;
-            simplex.count = 3;
-            return TriangleSimplex(ref simplex);
-        }
-        // the origin potentially falls on multiple triangles
-        ComplexSimplex simplex_abc = simplex.Copy();
-        simplex_abc.count = 3;
-        ComplexSimplex simplex_acd = simplex.Copy();
-        simplex_acd.b = simplex_acd.c; simplex_acd.b1 = simplex_acd.c1; simplex_acd.b2 = simplex_acd.c2;
-        simplex_acd.c = simplex_acd.d; simplex_acd.c1 = simplex_acd.d1; simplex_acd.c2 = simplex_acd.d2;
-        simplex_acd.count = 3;
-        ComplexSimplex simplex_adb = simplex.Copy();
-        simplex_adb.c = simplex_adb.b; simplex_adb.c1 = simplex_adb.b1; simplex_adb.c2 = simplex_adb.b2;
-        simplex_adb.b = simplex_adb.d; simplex_adb.b1 = simplex_adb.d1; simplex_adb.b2 = simplex_adb.d2;
-        simplex_adb.count = 3;
-        SimplexSolve abcsolved = TriangleSimplex(ref simplex_abc);
-        SimplexSolve acdsolved = TriangleSimplex(ref simplex_acd);
-        SimplexSolve adbsolved = TriangleSimplex(ref simplex_adb);
-        float abc_d2 = Vector3.Dot(abcsolved.p, abcsolved.p);
-        float acd_d2 = Vector3.Dot(acdsolved.p, acdsolved.p);
-        float adb_d2 = Vector3.Dot(adbsolved.p, adbsolved.p);
-        if (abc_d2 <= acd_d2 && abc_d2 <= adb_d2)
-        {
-            simplex = simplex_abc;
-            return abcsolved;
-        }
-        else if (acd_d2 <= abc_d2 && acd_d2 <= adb_d2)
-        {
-            simplex = simplex_acd;
-            return acdsolved;
-        }
-        else if (adb_d2 <= abc_d2 && adb_d2 <= acd_d2)
-        {
-            simplex = simplex_adb;
-            return adbsolved;
-        }
-        // the origin isn't outside of any plane, so it's inside the tretrahedron
-        ret = new SimplexSolve();
-        ret.p = Vector3.zero;
-        ret.dir = Vector3.zero;
-        return ret;
-    }
-
-    float GetDirStrength(Vector3 v, Vector3 direction)
-    {
-        return v.x * direction.x + v.y * direction.y + v.z * direction.z;
-    }
-
-    SimplexSolve GetLocalPoints(ComplexSimplex simplex, Vector3 p) //return type struct instead of List<> for speed
-    {
-        Vector3 cartesian1;
-        Vector3 cartesian2;
-        SimplexSolve ret = new SimplexSolve();
-        switch (simplex.count)
-        {
-            case 1:
-                ret.p = simplex.a1; ret.dir = simplex.a2;
-                return ret;
-            case 2:
-                float fbarycentric = fConvertBarycentric(simplex.a, simplex.b, p);
-                cartesian1 = ConvertCartesian(simplex.a1, simplex.b1, fbarycentric);
-                cartesian2 = ConvertCartesian(simplex.a2, simplex.b2, fbarycentric);
-                ret.p = cartesian1; ret.dir = cartesian2;
-                return ret;
-            case 3:
-                Vector3 v3barycentric = v3ConvertBarycentric(simplex.a, simplex.b, simplex.c, p);
-                cartesian1 = ConvertCartesian(simplex.a1, simplex.b1, simplex.c1, v3barycentric);
-                cartesian2 = ConvertCartesian(simplex.a2, simplex.b2, simplex.c2, v3barycentric);
-                ret.p = cartesian1; ret.dir = cartesian2;
-                return ret;
-            case 4:
-                // Compute barycentric coordinates of p (which should be 0) inside the CSO tetrahedron
-                Vector3 A = simplex.a, B = simplex.b, C = simplex.c, D = simplex.d;
-                // Volumes of sub-tetrahedra (signed)
-                float volABC = Vector3.Dot(Vector3.Cross(B - A, C - A), D - A);
-                float volPBC = Vector3.Dot(Vector3.Cross(B - p, C - p), D - p);
-                float volAPC = Vector3.Dot(Vector3.Cross(C - p, A - p), D - p);
-                float volABP = Vector3.Dot(Vector3.Cross(A - p, B - p), D - p);
-                float volABCP = Vector3.Dot(Vector3.Cross(B - A, C - A), p - A);
-
-                // Avoid division by zero (simplex should be non-degenerate)
-                if (Mathf.Abs(volABC) < EPSILON)
-                {
-                    ret.p = Vector3.zero; ret.dir = Vector3.zero;
-                    return ret;
-                }
-                float inv = 1.0f / volABC;
-                float u = volPBC * inv; // weight for A
-                float v = volAPC * inv; // weight for B
-                float w = volABP * inv; // weight for C
-                float z = volABCP * inv;// weight for D
-
-                // Interpolate world-space points
-                cartesian1 = u * simplex.a1 + v * simplex.b1 + w * simplex.c1 + z * simplex.d1;
-                cartesian2 = u * simplex.a2 + v * simplex.b2 + w * simplex.c2 + z * simplex.d2;
-                ret.p = cartesian1;
-                ret.dir = cartesian2;
-                return ret;
-            default:
-                ret.p = Vector3.zero; ret.dir = Vector3.zero;
-                return ret;
-        }
-    }
-
-    Vector3 v3ConvertBarycentric(Vector3 a, Vector3 b, Vector3 c, Vector3 p)
-    {
-        Vector3 abc = Vector3.Cross(b - a, c - a);
-        float nu;
-        float nv;
-        float ood;
-        float x = Math.Abs(abc.x);
-        float y = Math.Abs(abc.y);
-        float z = Math.Abs(abc.z);
-        if (x >= y && x >= z)
-        {
-            // x is the largest so project onto the yz plane
-            nu = Get2DTriangleArea(p.y, p.z, b.y, b.z, c.y, c.z);
-            nv = Get2DTriangleArea(p.y, p.z, c.y, c.z, a.y, a.z);
-            ood = 1f / abc.x;
-        }
-        else if (y >= x && y >= z)
-        {
-            // y is the largest so project onto the xz plane
-            nu = Get2DTriangleArea(p.x, p.z, b.x, b.z, c.x, c.z);
-            nv = Get2DTriangleArea(p.x, p.z, c.x, c.z, a.x, a.z);
-            ood = 1f / -abc.y;
-        }
-        else
-        {
-            // z is the largest so project onto the xy plane
-            nu = Get2DTriangleArea(p.x, p.y, b.x, b.y, c.x, c.y);
-            nv = Get2DTriangleArea(p.x, p.y, c.x, c.y, a.x, a.y);
-            ood = 1f / abc.z;
-        }
-        Vector3 ret = new Vector3();
-        ret.x = nu * ood;
-        ret.y = nv * ood;
-        ret.z = 1f - ret.x - ret.y;
-        return ret;
-    }
-
-    float Get2DTriangleArea(float x1, float y1, float x2, float y2, float x3, float y3)
-    {
-        return (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2);
-    }
-
-    Vector3 ConvertCartesian(Vector3 a, Vector3 b, Vector3 c, Vector3 barycentric)
-    {
-        Vector3 ret = new Vector3();
-        ret.x = a.x * barycentric.x + b.x * barycentric.y + c.x * barycentric.z;
-        ret.y = a.y * barycentric.x + b.y * barycentric.y + c.y * barycentric.z;
-        ret.z = a.z * barycentric.x + b.z * barycentric.y + c.z * barycentric.z;
-        return ret;
-    }
-
-    float fConvertBarycentric(Vector3 a, Vector3 b, Vector3 p)
-    {
-        Vector3 ab = b - a;
-        Vector3 ap = p - a;
-        return Vector3.Dot(ap, ab) / Vector3.Dot(ab, ab);
-    }
-
-    Vector3 ConvertCartesian(Vector3 a, Vector3 b, float barycentric)
-    {
-        Vector3 ret = new Vector3();
-        ret.x = a.x + barycentric * (b.x - a.x);
-        ret.y = a.y + barycentric * (b.y - a.y);
-        ret.z = a.z + barycentric * (b.z - a.z);
-        return ret;
-    }
-
+    // Minimum translation vector that pushes the player out of the mesh.
     public bool ComputeMTV(MeshCollider mesh, Vector3 playerHalfExtents, Vector3 playerPos, out Vector3 mtv)
     {
         mtv = Vector3.zero;
+        GJKResult r = Distance(mesh, playerHalfExtents, playerPos);
+        if (!r.overlap) return false;
 
-        ComplexSimplex simplex;
-        GJKHit gjk = GJKComplex(mesh, playerHalfExtents, playerPos, Vector3.one, out simplex);
+        EPAResult e;
+        if (!RunEPA(mesh, playerHalfExtents, playerPos, out e)) return false;
 
-        if (!gjk.hit || simplex.count < 4) return false;
-
-        // Support delegate-ek: a mesh support-ja közvetlenül a MeshCollider-t kapja,
-        // a player support-ja a playerPos-szal eltolt doboz.
-        System.Func<Vector3, Vector3> supportA =
-            dir => playerPos + GJKSupport.PlayerBox(-dir, playerHalfExtents);
-        System.Func<Vector3, Vector3> supportB =
-            dir => GJKSupport.Mesh(dir, mesh);
-
-        Vector3[] cso = { simplex.a, simplex.b, simplex.c, simplex.d };
-        Vector3[] ptA = { simplex.a1, simplex.b1, simplex.c1, simplex.d1 };
-        Vector3[] ptB = { simplex.a2, simplex.b2, simplex.c2, simplex.d2 };
-
-        EPAResult epa = EPA.Compute(cso, ptA, ptB, supportA, supportB);
-        if (!epa.valid) return false;
-
-        // CSO = mesh - player.  A player +mtv eltolása a CSO-t -mtv-vel tolja,
-        // ami pont a `normal * depth` mértékű szétválasztás.
-        mtv = epa.depth * epa.normal;
+        // CSO = mesh - player. Moving the player by +normal*depth shifts the CSO by -normal*depth,
+        // which puts the origin exactly on the CSO boundary.
+        mtv = e.normal * e.depth;
         return true;
+    }
+
+    // ------------------------------------------------------------------------------
+    // Internals
+    // ------------------------------------------------------------------------------
+
+    static GJKHit MakeHit(float dist, Vector3 normal, Vector3 a, Vector3 b, float wishDist)
+    {
+        GJKHit h = new GJKHit();
+        h.hit = true;
+        h.distance = Mathf.Min(dist, wishDist);
+        h.normal = normal.normalized;
+        h.closestA = a;
+        h.closestB = b;
+        h.point = b;
+        return h;
+    }
+
+    static Vertex Support(Vector3 dir, MeshCollider mesh, Vector3 he, Vector3 pos)
+    {
+        Vertex v;
+        v.b = GJKSupport.Mesh(dir, mesh);
+        v.a = pos + GJKSupport.PlayerBox(-dir, he);
+        v.cso = v.b - v.a;
+        return v;
+    }
+
+    // Runs GJK. The final simplex stays in the `simplex` field (needed for EPA when overlap == true).
+    GJKResult Distance(MeshCollider mesh, Vector3 he, Vector3 pos)
+    {
+        GJKResult r = new GJKResult();
+
+        Vector3 dir = mesh.bounds.center - pos;
+        if (dir.sqrMagnitude < 1e-12f) dir = Vector3.right;
+
+        simplex.count = 1;
+        simplex.v[0] = Support(dir, mesh, he, pos);
+
+        Vector3 p;
+        int iter = 0;
+        while (true)
+        {
+            p = Solve(simplex);
+
+            if (simplex.count == 4 || p.sqrMagnitude < OVERLAP_DIST_SQ)
+            {
+                r.overlap = true;
+                return r;
+            }
+
+            if (++iter > MAX_GJK_ITER) break;
+
+            float d2 = p.sqrMagnitude;
+            Vertex w = Support(-p, mesh, he, pos);
+
+            // p.(p - w) is how much closer the CSO could still get along -p
+            float gap = d2 - Vector3.Dot(p, w.cso);
+            if (gap <= d2 * 1e-4f + 1e-6f) break;
+
+            bool duplicate = false;
+            for (int i = 0; i < simplex.count; ++i)
+                if ((simplex.v[i].cso - w.cso).sqrMagnitude < 1e-10f) { duplicate = true; break; }
+            if (duplicate) break;
+
+            simplex.v[simplex.count++] = w;
+        }
+
+        r.p = p;
+        r.distance = p.magnitude;
+        Vector3 A = Vector3.zero, B = Vector3.zero;
+        for (int i = 0; i < simplex.count; ++i)
+        {
+            A += simplex.l[i] * simplex.v[i].a;
+            B += simplex.l[i] * simplex.v[i].b;
+        }
+        r.closestA = A;
+        r.closestB = B;
+        return r;
+    }
+
+    bool RunEPA(MeshCollider mesh, Vector3 he, Vector3 pos, out EPAResult res)
+    {
+        int n = simplex.count;
+        Vector3[] cso = new Vector3[n];
+        Vector3[] ptA = new Vector3[n];
+        Vector3[] ptB = new Vector3[n];
+        for (int i = 0; i < n; ++i)
+        {
+            cso[i] = simplex.v[i].cso;
+            ptA[i] = simplex.v[i].a;
+            ptB[i] = simplex.v[i].b;
+        }
+
+        // plain supports: EPA flips the direction for A itself
+        System.Func<Vector3, Vector3> supportA = dir => pos + GJKSupport.PlayerBox(dir, he);
+        System.Func<Vector3, Vector3> supportB = dir => GJKSupport.Mesh(dir, mesh);
+
+        res = EPA.Compute(cso, ptA, ptB, supportA, supportB);
+        return res.valid;
+    }
+
+    // ---- closest point on simplex to the origin; reduces the simplex to the supporting feature ----
+
+    Vector3 Solve(Simplex s)
+    {
+        switch (s.count)
+        {
+            case 1: s.l[0] = 1f; return s.v[0].cso;
+            case 2: return SolveLine(s);
+            case 3: return SolveTriangle(s);
+            default: return SolveTetra(s);
+        }
+    }
+
+    static Vector3 Keep1(Simplex s, Vertex a)
+    {
+        s.v[0] = a; s.count = 1; s.l[0] = 1f;
+        return a.cso;
+    }
+
+    static void Keep2(Simplex s, Vertex a, Vertex b, float la, float lb)
+    {
+        s.v[0] = a; s.v[1] = b; s.count = 2; s.l[0] = la; s.l[1] = lb;
+    }
+
+    Vector3 SolveLine(Simplex s)
+    {
+        Vertex va = s.v[0], vb = s.v[1];
+        Vector3 a = va.cso, b = vb.cso;
+        Vector3 ab = b - a;
+        float den = Vector3.Dot(ab, ab);
+        if (den < 1e-14f) return Keep1(s, va);
+
+        float t = -Vector3.Dot(a, ab) / den;
+        if (t <= 0f) return Keep1(s, va);
+        if (t >= 1f) return Keep1(s, vb);
+
+        s.count = 2;
+        s.l[0] = 1f - t; s.l[1] = t;
+        return a + ab * t;
+    }
+
+    // Ericson, Real-Time Collision Detection, ClosestPtPointTriangle with p = origin
+    Vector3 SolveTriangle(Simplex s)
+    {
+        Vertex va = s.v[0], vb = s.v[1], vc = s.v[2];
+        Vector3 a = va.cso, b = vb.cso, c = vc.cso;
+        Vector3 ab = b - a, ac = c - a;
+
+        float d1 = -Vector3.Dot(ab, a);
+        float d2 = -Vector3.Dot(ac, a);
+        if (d1 <= 0f && d2 <= 0f) return Keep1(s, va);
+
+        float d3 = -Vector3.Dot(ab, b);
+        float d4 = -Vector3.Dot(ac, b);
+        if (d3 >= 0f && d4 <= d3) return Keep1(s, vb);
+
+        float vcr = d1 * d4 - d3 * d2;
+        if (vcr <= 0f && d1 >= 0f && d3 <= 0f)
+        {
+            float v = d1 / (d1 - d3);
+            Keep2(s, va, vb, 1f - v, v);
+            return a + ab * v;
+        }
+
+        float d5 = -Vector3.Dot(ab, c);
+        float d6 = -Vector3.Dot(ac, c);
+        if (d6 >= 0f && d5 <= d6) return Keep1(s, vc);
+
+        float vbr = d5 * d2 - d1 * d6;
+        if (vbr <= 0f && d2 >= 0f && d6 <= 0f)
+        {
+            float w = d2 / (d2 - d6);
+            Keep2(s, va, vc, 1f - w, w);
+            return a + ac * w;
+        }
+
+        float var_ = d3 * d6 - d5 * d4;
+        if (var_ <= 0f && (d4 - d3) >= 0f && (d5 - d6) >= 0f)
+        {
+            float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+            Keep2(s, vb, vc, 1f - w, w);
+            return b + (c - b) * w;
+        }
+
+        float sum = var_ + vbr + vcr;
+        if (Mathf.Abs(sum) < 1e-20f)
+        {
+            // degenerate (collinear) triangle: drop the newest vertex
+            s.count = 2;
+            return SolveLine(s);
+        }
+
+        float inv = 1f / sum;
+        float vv = vbr * inv, ww = vcr * inv;
+        s.l[0] = 1f - vv - ww; s.l[1] = vv; s.l[2] = ww;
+        return a + ab * vv + ac * ww;
+    }
+
+    static readonly int[,] TetraFaces = { { 0, 1, 2, 3 }, { 0, 1, 3, 2 }, { 0, 2, 3, 1 }, { 1, 2, 3, 0 } };
+
+    Vector3 SolveTetra(Simplex s)
+    {
+        Vector3 a = s.v[0].cso, b = s.v[1].cso, c = s.v[2].cso, d = s.v[3].cso;
+        Vector3 ab = b - a, ac = c - a, ad = d - a;
+
+        float vol = Vector3.Dot(Vector3.Cross(ab, ac), ad);
+        float scale = ab.magnitude * ac.magnitude * ad.magnitude;
+        if (Mathf.Abs(vol) <= 1e-6f * scale + 1e-20f)
+        {
+            // flat tetrahedron: drop the newest vertex
+            s.count = 3;
+            return SolveTriangle(s);
+        }
+
+        bool anyOutside = false;
+        float bestD2 = float.PositiveInfinity;
+        Vector3 bestP = Vector3.zero;
+
+        for (int f = 0; f < 4; ++f)
+        {
+            int i = TetraFaces[f, 0], j = TetraFaces[f, 1], k = TetraFaces[f, 2], o = TetraFaces[f, 3];
+            Vector3 pi = s.v[i].cso;
+            Vector3 n = Vector3.Cross(s.v[j].cso - pi, s.v[k].cso - pi);
+            float sideOpp = Vector3.Dot(n, s.v[o].cso - pi);
+            float sideOrg = Vector3.Dot(n, -pi);
+            if (sideOrg * sideOpp >= 0f) continue; // origin on the inner side of this face
+
+            anyOutside = true;
+            tmp.count = 3;
+            tmp.v[0] = s.v[i]; tmp.v[1] = s.v[j]; tmp.v[2] = s.v[k];
+            Vector3 q = SolveTriangle(tmp);
+            float d2 = q.sqrMagnitude;
+            if (d2 < bestD2)
+            {
+                bestD2 = d2;
+                bestP = q;
+                best.CopyFrom(tmp);
+            }
+        }
+
+        if (!anyOutside)
+        {
+            s.count = 4;      // origin inside the tetrahedron
+            return Vector3.zero;
+        }
+
+        s.CopyFrom(best);
+        return bestP;
     }
 }

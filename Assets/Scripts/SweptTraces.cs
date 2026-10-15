@@ -31,26 +31,9 @@ public class SweptTraces : MonoBehaviour
         return Vector3.Dot(direction, wishMove) > 0f ? unswept + wishMove : unswept;
     }
 
-    Vector3 SupportMesh(Vector3 direction, MeshCollider meshCollider) //bounds of mesh collider, returns world-space vertices
+    Vector3 SupportMesh(Vector3 direction, MeshCollider meshCollider)
     {
-        Transform meshTransform = meshCollider.transform;
-        Mesh mesh = meshCollider.sharedMesh;
-        Vector3[] vertices = mesh.vertices; // local space
-
-        float bestDot = float.NegativeInfinity;
-        Vector3 bestVertex = Vector3.zero;
-
-        foreach (Vector3 localVertex in vertices)
-        {
-            Vector3 worldVertex = meshTransform.TransformPoint(localVertex);
-            float dot = Vector3.Dot(direction, worldVertex /*- playerPos */);
-            if (dot > bestDot)
-            {
-                bestDot = dot;
-                bestVertex = worldVertex;
-            }
-        }
-        return bestVertex;
+        return GJKSupport.Mesh(direction, meshCollider);
     }
 
     Vector3 SupportMinkowskiDiff(Vector3 direction, MeshCollider meshCollider, Vector3 playerHalfExtents, Vector3 playerPos) //support function for signed minkowski sum, if replacing player with meshcollider, remove playerpos
