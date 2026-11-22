@@ -1,0 +1,16 @@
+[1] E. G. Gilbert, D. W. Johnson, and S. S. Keerthi, „A fast procedure for computing the distance between complex objects in three-dimensional space,” IEEE Journal on Robotics and Automation, vol. 4, no. 2, pp. 193–203, Apr. 1988, doi: 10.1109/56.2083.
+[2] G. van den Bergen, Collision Detection in Interactive 3D Environments. San Francisco, CA, USA: Morgan Kaufmann, 2003, doi: 10.1201/9781482297997.
+[3] G. van den Bergen, „A Fast and Robust GJK Implementation for Collision Detection of Convex Objects,” Journal of Graphics Tools, vol. 4, no. 2, pp. 7–25, 1999, doi: 10.1080/10867651.1999.10487502.
+[4] G. van den Bergen, „Efficient Collision Detection of Complex Deformable Models using AABB Trees,” Journal of Graphics Tools, vol. 2, no. 4, pp. 1–14, 1997, doi: 10.1080/10867651.1997.10487480.
+[5] M. Montaut et al., „GJK Acceleration,” 2024. [Online]. Available: https://simple-robotics.github.io/publications/gjk-acceleration/static/paper/montaut2024gjk.pdf (Accessed: Nov. 22, 2026).
+[6] G. van den Bergen, „Ray Casting against General Convex Objects with Application to Continuous Collision Detection,” unpublished manuscript submitted to Journal of Graphics Tools, Jun. 15, 2004. [Online]. Available: http://www.dtecta.com/papers/jgt04raycast.pdf (Accessed: Nov. 22, 2026).
+[7] G. van den Bergen, „Continuous Collision Detection of General Convex Objects Under Translation,” presented at the Game Developers Conference (GDC), 2005. [Online]. Available: https://www.gdcvault.com/play/1019951/Continuous-Collision-Detection-of-General (Accessed: Nov. 22, 2026).
+[8] id Software, Quake – QW/client/pmove.c, source code. [Online]. Available: https://github.com/id-Software/Quake/blob/bf4ac424ce754894ac8f1dae6a3981954bc9852d/QW/client/pmove.c (Accessed: Nov. 22, 2026).
+[9] Valve Software, Source SDK 2013 – game movement sources, source code. [Online]. Available: https://github.com/ValveSoftware/source-sdk-2013 (Accessed: Nov. 22, 2026).
+[10] kujukuju, KodaPhysics, source code. [Online]. Available: https://github.com/kujukuju/KodaPhysics (Accessed: Nov. 22, 2026).
+[11] dmitriwamback, GJK, source code. [Online]. Available: https://github.com/dmitriwamback/GJK (Accessed: Nov. 22, 2026).
+[12] C. B., „Review,” unpublished manuscript, Nov. 18, 2023. [Online]. Available: https://www.dropbox.com/scl/fi/c0vxjztou9xj0of1zamer/Review.pdf?rlkey=rv9l35ze3uvhbk5llnwl1ld0k&dl=0 (Accessed: Nov. 22, 2026).
+[13] Valve Developer Community, „Team Fortress 2/Mapper’s Reference.” [Online]. Available: https://developer.valvesoftware.com/wiki/Team_Fortress_2/Mapper%27s_Reference (Accessed: Nov. 22, 2026).
+[14] Matt’s Ramblings, Source engine movement videos. [Online]. Available: https://www.youtube.com/@MattsRamblings (Accessed: Nov. 22, 2026).
+[15] htwo1, Quake/Source movement analysis videos. [Online]. Available: https://www.youtube.com/@htwo1 (Accessed: Nov. 22, 2026).
+[16] shounic, Source engine mechanics videos. [Online]. Available: https://www.youtube.com/@shounic (Accessed: Nov. 22, 2026).

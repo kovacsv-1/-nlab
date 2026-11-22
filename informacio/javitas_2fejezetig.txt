@@ -1,0 +1,19 @@
+BÍRÁLATI ÖSSZEVETÉS (megjegyzések) + JAVÍTANDÓ: 2. FEJEZET + IRODALOMJEGYZÉK
+A Word NEM módosult. Összefoglaló + Abstract: ELFÓGADOVA – ne cseréld le. 3–7. fejezet: még vázlat, most ne nyúlj hozzá.
+Másold: 02_fejezet_irodalomkutatas.txt és 02_irodalomjegyzek_vazlat.txt (üres sorok nélkül).
+---
+A) Buktatók (csak ami a 2. fejezet / forma / későbbi munka szempontjából számít)
+1) TOC-ban és 3–7.-nél még „(~N oldal)” + bullet-vázlat – beadás előtt töröld; most hagyd.
+2) Kiírás „tesztpálya” vs. sandbox – a 6. fejezetben indokold (pontozlólap: eltérés indoklása).
+3) Gilbert–Johnson–Keerthi (1988) hiányzott – a javított jegyzék [1]-je.
+4) YouTube/Dropbox másodlagos legyen; 2.2 gerince: IEEE/könyv/JGT.
+5) 2.3 döntések vs. 3.3 vázlat: később a 3.3-at vedd ki / ne ismételd.
+6) Word beillesztés: ellenőrizd, hogy a kifejezések nem csúsztak egybe (ExpandingPolytope stb.).
+7) Bevezetés „nem titkolt célja” – ha még ott van, cseréld semlegesre; az Abstractig tartó részt ne írd újra.
+8) MI-nyilatkozat a függelékben beadás előtt kitöltendő.
+---
+B) Javított 2. fejezet és irodalomjegyzék
+Lásd (üres sorok nélkül, bekezdés = egy sor):
+informacio/02_fejezet_irodalomkutatas.txt
+informacio/02_irodalomjegyzek_vazlat.txt
+A hivatkozásszámozás a jegyzékhez igazodik ([1]=Gilbert 1988 … [16]=shounic).
