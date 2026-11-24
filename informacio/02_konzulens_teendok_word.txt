@@ -1,0 +1,21 @@
+Konzulens-kommentek: mit csináltam plaintextben, mit Wordben kell
+A tartalmi javítás: informacio/02_fejezet_irodalomkutatas.txt (cseréld a 2. fejezetet).
+WORD / FORMA (plaintextből nem megy):
+- Normál bekezdések: sorkizárt (sablon szerint)
+- Alfejezetcímek: félkövér (Heading stílus)
+- Képletek / pszeudokód: külön stílus (Kód / idézet / monospace), a szövegben [Képlet] és [Pszeudokód] jelölőknél
+- Hivatkozások: érdemes Word kereszthivatkozás / irodalomkezelő (kattintható); számozás az előfordulás sorrendje szerint 1-től (most a [8],[9]… még a régi sorrendet követi – átszámozás Wordben)
+ÁBRÁK (nice to have, konzulens kérte):
+- 2.1: mozgásfrissítés / wishdir-airstrafe vázlat
+- 2.2.3: GJK szimplex redukció
+TARTALMI VÁLASZOK A KOMMENTEKRE (már a plaintextben):
+- 2. fejezet nyitó „roadmap” bekezdés: törölve
+- 2.1 végén: miért Source Unity-ben (rövid, informális indoklás)
+- Source bounding box, ground-check, step-up, knockback: bevezetve 2.1-ben
+- Minkowski: [1],[2] az első említésnél
+- GJK: nem említve a support-alfejezetben előre; pszeudokód a 2.2.3-ban
+- EPA: hivatkozás az első megnevezésnél
+- swept AABB / swept hull: rövid definíció
+- 2.3.1 Unity rövid alfejezet
+- SAT, continuous cast, MPR: feloldva / bevezetve a döntéseknél
+- 2.4: KodaPhysics, Montaut, ray cast bővebben
